@@ -92,7 +92,7 @@ func main() {
 			FFmpegBin:  ffmpegBin,
 			FFprobeBin: ffprobeBin,
 			FadeOutSec: 5.0,
-			MusicPath:  envOr("MUSIC_PATH", "assets/music/ambient_drone.wav"),
+			MusicPath:  envOr("MUSIC_PATH", "assets/music/breakzstudios-calm-of-the-cosmos-165862.mp3"),
 			MusicVol:   0.5,
 		},
 	}

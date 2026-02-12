@@ -3,6 +3,7 @@ package render
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -50,13 +51,16 @@ func Render(ctx context.Context, cfg RenderConfig, imagePath, audioPath string, 
 	hasMusic := cfg.MusicPath != ""
 	if hasMusic {
 		if _, err := os.Stat(cfg.MusicPath); err != nil {
+			log.Printf("render: music file not found at %q, rendering without music", cfg.MusicPath)
 			hasMusic = false
 		}
 	}
 
 	if hasMusic {
+		log.Printf("render: mixing with music %s (vol=%.0f%%)", cfg.MusicPath, cfg.MusicVol*100)
 		return renderWithMusic(ctx, cfg, imagePath, audioPath, audioDurSec, fadeStart, vFilter, outPath)
 	}
+	log.Println("render: no music, rendering narration only")
 	return renderSimple(ctx, cfg, imagePath, audioPath, fadeStart, vFilter, outPath)
 }
 
