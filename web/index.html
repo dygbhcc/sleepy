@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sleepy - Kontrol Paneli</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--border:#2e3348;
+  --text:#e4e4e7;--text2:#a1a1aa;--accent:#6366f1;--accent-hover:#818cf8;
+  --green:#22c55e;--yellow:#eab308;--blue:#3b82f6;--red:#ef4444;
+  --radius:8px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+a{color:var(--accent);text-decoration:none}
+
+/* Header */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:100}
+header h1{font-size:20px;font-weight:700;background:linear-gradient(135deg,var(--accent),#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+header span{color:var(--text2);font-size:14px}
+
+/* Layout */
+.container{max-width:1400px;margin:0 auto;padding:24px}
+.top-row{display:grid;grid-template-columns:380px 1fr;gap:24px;margin-bottom:24px}
+
+/* Card */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
+.card h2{font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+
+/* Form */
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:13px;color:var(--text2);margin-bottom:4px}
+.form-group input,.form-group select{width:100%;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;outline:none}
+.form-group input:focus,.form-group select:focus{border-color:var(--accent)}
+.btn{padding:8px 16px;border:none;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:all .15s}
+.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{background:var(--accent-hover)}
+.btn-danger{background:var(--red);color:#fff}.btn-danger:hover{opacity:.85}
+.btn-sm{padding:5px 10px;font-size:12px}
+.btn-block{width:100%;margin-top:4px}
+
+/* Filters */
+.filters{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.filter-btn{padding:5px 12px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);border-radius:20px;font-size:12px;cursor:pointer;transition:all .15s}
+.filter-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* Table */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;border-bottom:1px solid var(--border)}
+td{padding:10px 12px;border-bottom:1px solid var(--border);font-size:14px}
+tr:hover{background:var(--surface2);cursor:pointer}
+.empty-row td{text-align:center;color:var(--text2);padding:40px}
+
+/* Badge */
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;text-transform:uppercase}
+.badge-pending{background:#eab30820;color:var(--yellow)}
+.badge-progress{background:#3b82f620;color:var(--blue)}
+.badge-done{background:#22c55e20;color:var(--green)}
+.badge-failed{background:#ef444420;color:var(--red)}
+
+/* Modal overlay */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:flex;align-items:start;justify-content:center;padding:40px 20px;overflow-y:auto}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:800px;animation:slideIn .2s ease}
+@keyframes slideIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)}
+.modal-header h2{font-size:18px;font-weight:600}
+.modal-close{background:none;border:none;color:var(--text2);font-size:22px;cursor:pointer;padding:4px 8px}
+.modal-close:hover{color:var(--text)}
+.modal-body{padding:20px}
+
+/* Progress bar */
+.progress-bar{display:flex;gap:4px;margin-bottom:20px}
+.progress-step{flex:1;text-align:center;padding:6px 0;font-size:10px;font-weight:600;border-radius:4px;background:var(--surface2);color:var(--text2)}
+.progress-step.done{background:var(--green);color:#fff}
+.progress-step.current{background:var(--blue);color:#fff}
+.progress-step.failed{background:var(--red);color:#fff}
+
+/* Detail sections */
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.detail-item{font-size:13px}
+.detail-item .label{color:var(--text2)}
+.detail-item .value{font-weight:500;margin-top:2px}
+
+.section{margin-bottom:20px}
+.section h3{font-size:14px;font-weight:600;margin-bottom:10px;color:var(--text2)}
+
+/* Assets */
+.asset-list{display:flex;flex-direction:column;gap:8px}
+.asset-item{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface2);border-radius:6px;font-size:13px}
+.asset-item a{font-size:12px}
+
+/* Script editor */
+.script-area{width:100%;min-height:200px;padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;resize:vertical;outline:none}
+.script-area:focus{border-color:var(--accent)}
+.script-actions{display:flex;gap:8px;margin-top:8px}
+
+/* Media */
+.thumb-preview{max-width:100%;border-radius:6px;margin-top:8px}
+.video-player{width:100%;border-radius:6px;margin-top:8px}
+
+/* Error box */
+.error-box{background:#ef444415;border:1px solid var(--red);border-radius:6px;padding:12px;color:var(--red);font-size:13px;margin-bottom:16px;white-space:pre-wrap}
+
+/* Modal footer */
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--border)}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;font-size:14px;z-index:300;animation:slideIn .2s ease;color:#fff}
+.toast-success{background:var(--green)}.toast-error{background:var(--red)}
+
+/* Responsive */
+@media(max-width:768px){.top-row{grid-template-columns:1fr}.detail-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Sleepy</h1>
+  <span>Kontrol Paneli</span>
+</header>
+
+<div class="container">
+  <div class="top-row">
+    <!-- Create Form -->
+    <div class="card">
+      <h2>Yeni Bolum Olustur</h2>
+      <form id="createForm">
+        <div class="form-group">
+          <label>Series</label>
+          <input type="text" id="fSeries" placeholder="Ornek: Uzay Hikayeleri" required>
+        </div>
+        <div class="form-group">
+          <label>Episode</label>
+          <input type="text" id="fEpisode" placeholder="Ornek: Saturnun Halkalari" required>
+        </div>
+        <div class="form-group">
+          <label>Style</label>
+          <select id="fStyle">
+            <option value="Cosmos">Cosmos</option>
+            <option value="Earthside">Earthside</option>
+            <option value="Myth">Myth</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Sure (dakika)</label>
+          <input type="number" id="fDuration" value="30" min="1" max="180">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Olustur</button>
+      </form>
+    </div>
+
+    <!-- Stats -->
+    <div class="card">
+      <h2>Ozet</h2>
+      <div id="statsArea" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px"></div>
+    </div>
+  </div>
+
+  <!-- Runs Table -->
+  <div class="card">
+    <h2>Tum Calistirmalar</h2>
+    <div class="filters" id="filterBar"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Series</th><th>Episode</th><th>Style</th><th>Sure</th><th>Durum</th><th>Tarih</th>
+          </tr>
+        </thead>
+        <tbody id="runsBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="modalOverlay" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalTitle">Run Detay</h2>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter"></div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let allRuns = [];
+let currentFilter = 'ALL';
+let refreshTimer = null;
+
+const STATUSES = ['ALL','PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','DONE','FAILED'];
+const PIPELINE = ['PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','DONE'];
+
+function statusClass(s){
+  if(s==='DONE'||s==='PACKAGED')return 'badge-done';
+  if(s==='FAILED')return 'badge-failed';
+  if(s==='PENDING')return 'badge-pending';
+  return 'badge-progress';
+}
+
+function fmtDate(d){
+  if(!d)return '-';
+  const dt=new Date(d);
+  return dt.toLocaleDateString('tr-TR')+' '+dt.toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+}
+
+function toast(msg,type='success'){
+  const t=document.createElement('div');
+  t.className='toast toast-'+type;
+  t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(),3000);
+}
+
+// -- Filters --
+function renderFilters(){
+  const bar=document.getElementById('filterBar');
+  bar.innerHTML='';
+  STATUSES.forEach(s=>{
+    const b=document.createElement('button');
+    b.className='filter-btn'+(currentFilter===s?' active':'');
+    const count=s==='ALL'?allRuns.length:allRuns.filter(r=>r.Status===s).length;
+    b.textContent=s+' ('+count+')';
+    b.onclick=()=>{currentFilter=s;renderFilters();renderTable()};
+    bar.appendChild(b);
+  });
+}
+
+// -- Stats --
+function renderStats(){
+  const area=document.getElementById('statsArea');
+  const counts={};
+  STATUSES.slice(1).forEach(s=>counts[s]=0);
+  allRuns.forEach(r=>counts[r.Status]=(counts[r.Status]||0)+1);
+  area.innerHTML='';
+  [['Toplam',allRuns.length,'var(--accent)'],['Bekleyen',counts.PENDING||0,'var(--yellow)'],['Devam Eden',(counts.SCRIPTED||0)+(counts.VOICED||0)+(counts.THUMBNAILED||0)+(counts.RENDERED||0)+(counts.PACKAGED||0),'var(--blue)'],['Tamamlanan',counts.DONE||0,'var(--green)'],['Basarisiz',counts.FAILED||0,'var(--red)']].forEach(([label,val,color])=>{
+    area.innerHTML+=`<div style="background:var(--surface2);border-radius:8px;padding:16px;text-align:center">
+      <div style="font-size:28px;font-weight:700;color:${color}">${val}</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:4px">${label}</div></div>`;
+  });
+}
+
+// -- Table --
+function renderTable(){
+  const body=document.getElementById('runsBody');
+  const filtered=currentFilter==='ALL'?allRuns:allRuns.filter(r=>r.Status===currentFilter);
+  if(!filtered.length){
+    body.innerHTML='<tr class="empty-row"><td colspan="6">Henuz calistirma yok</td></tr>';
+    return;
+  }
+  body.innerHTML=filtered.map(r=>`<tr onclick="openDetail('${r.ID}')">
+    <td>${esc(r.Series)}</td>
+    <td>${esc(r.Episode)}</td>
+    <td>${esc(r.Style)}</td>
+    <td>${r.DurationMin} dk</td>
+    <td><span class="badge ${statusClass(r.Status)}">${r.Status}</span></td>
+    <td>${fmtDate(r.CreatedAt)}</td>
+  </tr>`).join('');
+}
+
+function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
+
+// -- Fetch runs --
+async function fetchRuns(){
+  try{
+    const res=await fetch(API+'/api/runs');
+    allRuns=await res.json();
+    renderStats();renderFilters();renderTable();
+  }catch(e){console.error('fetch runs:',e)}
+}
+
+// -- Create run --
+document.getElementById('createForm').onsubmit=async(e)=>{
+  e.preventDefault();
+  const body={
+    series:document.getElementById('fSeries').value.trim(),
+    episode:document.getElementById('fEpisode').value.trim(),
+    style:document.getElementById('fStyle').value,
+    duration_min:parseInt(document.getElementById('fDuration').value)||30
+  };
+  try{
+    const res=await fetch(API+'/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!res.ok)throw new Error((await res.json()).error);
+    toast('Calistirma olusturuldu!');
+    document.getElementById('createForm').reset();
+    document.getElementById('fDuration').value='30';
+    fetchRuns();
+  }catch(e){toast('Hata: '+e.message,'error')}
+};
+
+// -- Detail modal --
+async function openDetail(id){
+  document.getElementById('modalOverlay').style.display='flex';
+  document.getElementById('modalBody').innerHTML='<p style="color:var(--text2)">Yukleniyor...</p>';
+  document.getElementById('modalFooter').innerHTML='';
+  try{
+    const res=await fetch(API+'/api/runs/'+id);
+    const data=await res.json();
+    renderDetail(data);
+  }catch(e){
+    document.getElementById('modalBody').innerHTML='<p style="color:var(--red)">Yukleme hatasi</p>';
+  }
+}
+
+function closeModal(){document.getElementById('modalOverlay').style.display='none'}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+
+function renderDetail(data){
+  const run=data.run;
+  const assets=data.assets||[];
+  const jobs=data.jobs||[];
+
+  document.getElementById('modalTitle').textContent=run.Series+' - '+run.Episode;
+
+  // Progress bar
+  let progressHTML='<div class="progress-bar">';
+  const curIdx=PIPELINE.indexOf(run.Status);
+  PIPELINE.forEach((step,i)=>{
+    let cls='';
+    if(run.Status==='FAILED') cls=i<=curIdx?'failed':'';
+    else if(i<curIdx) cls='done';
+    else if(i===curIdx) cls='current';
+    progressHTML+=`<div class="progress-step ${cls}">${step}</div>`;
+  });
+  progressHTML+='</div>';
+
+  // Detail grid
+  let detailHTML=`<div class="detail-grid">
+    <div class="detail-item"><div class="label">Series</div><div class="value">${esc(run.Series)}</div></div>
+    <div class="detail-item"><div class="label">Episode</div><div class="value">${esc(run.Episode)}</div></div>
+    <div class="detail-item"><div class="label">Style</div><div class="value">${esc(run.Style)}</div></div>
+    <div class="detail-item"><div class="label">Sure</div><div class="value">${run.DurationMin} dakika</div></div>
+    <div class="detail-item"><div class="label">Durum</div><div class="value"><span class="badge ${statusClass(run.Status)}">${run.Status}</span></div></div>
+    <div class="detail-item"><div class="label">Olusturulma</div><div class="value">${fmtDate(run.CreatedAt)}</div></div>
+  </div>`;
+
+  // Error box
+  let errorHTML='';
+  if(run.Status==='FAILED'&&run.ErrorText){
+    errorHTML=`<div class="error-box"><strong>Hata:</strong>\n${esc(run.ErrorText)}</div>`;
+  }
+
+  // Assets
+  let assetsHTML='';
+  if(assets.length){
+    const kindLabels={script_md:'Script (MD)',script_ssml:'Script (SSML)',narration_wav:'Ses Dosyasi',thumbnail_png:'Thumbnail',video_mp4:'Video',metadata_json:'Metadata',episode_pack_zip:'Episode Paketi'};
+    assetsHTML='<div class="section"><h3>Uretilen Dosyalar</h3><div class="asset-list">';
+    assets.forEach(a=>{
+      const fname=a.Path.split('/').pop();
+      const url=API+'/assets/'+run.ID+'/'+fname;
+      assetsHTML+=`<div class="asset-item"><span>${kindLabels[a.Kind]||a.Kind} &mdash; ${fname}</span><a href="${url}" target="_blank">Goruntule / Indir</a></div>`;
+    });
+    assetsHTML+='</div></div>';
+  }
+
+  // Thumbnail preview
+  let thumbHTML='';
+  const thumbAsset=assets.find(a=>a.Kind==='thumbnail_png');
+  if(thumbAsset){
+    const fname=thumbAsset.Path.split('/').pop();
+    thumbHTML=`<div class="section"><h3>Thumbnail Onizleme</h3><img class="thumb-preview" src="${API}/assets/${run.ID}/${fname}" alt="thumbnail"></div>`;
+  }
+
+  // Video player
+  let videoHTML='';
+  const videoAsset=assets.find(a=>a.Kind==='video_mp4');
+  if(videoAsset){
+    const fname=videoAsset.Path.split('/').pop();
+    videoHTML=`<div class="section"><h3>Video</h3><video class="video-player" controls><source src="${API}/assets/${run.ID}/${fname}" type="video/mp4">Tarayiciniz video desteklemiyor.</video></div>`;
+  }
+
+  // Script section
+  const scriptAsset=assets.find(a=>a.Kind==='script_md');
+  let scriptHTML='';
+  if(scriptAsset){
+    scriptHTML=`<div class="section"><h3>Script</h3>
+      <div id="scriptLoading" style="color:var(--text2)">Script yukleniyor...</div>
+      <textarea class="script-area" id="scriptEditor" style="display:none"></textarea>
+      <div class="script-actions" id="scriptActions" style="display:none">
+        <button class="btn btn-primary btn-sm" onclick="saveScript('${run.ID}')">Kaydet</button>
+        <button class="btn btn-sm" style="background:var(--surface2);color:var(--text)" onclick="loadScript('${run.ID}')">Sifirla</button>
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('modalBody').innerHTML=progressHTML+errorHTML+detailHTML+assetsHTML+thumbHTML+videoHTML+scriptHTML;
+
+  // Footer buttons
+  let footerHTML='';
+  if(run.Status==='FAILED'){
+    footerHTML+=`<button class="btn btn-primary btn-sm" onclick="retryRun('${run.ID}')">Tekrar Dene</button>`;
+  }
+  footerHTML+=`<button class="btn btn-danger btn-sm" onclick="deleteRun('${run.ID}')">Sil</button>`;
+  document.getElementById('modalFooter').innerHTML=footerHTML;
+
+  // Load script content
+  if(scriptAsset)loadScript(run.ID);
+}
+
+async function loadScript(runID){
+  try{
+    const res=await fetch(API+'/api/runs/'+runID+'/script');
+    if(!res.ok)throw new Error('Script bulunamadi');
+    const text=await res.text();
+    const editor=document.getElementById('scriptEditor');
+    const loading=document.getElementById('scriptLoading');
+    const actions=document.getElementById('scriptActions');
+    editor.value=text;
+    editor.style.display='block';
+    loading.style.display='none';
+    actions.style.display='flex';
+  }catch(e){
+    document.getElementById('scriptLoading').textContent='Script yuklenemedi: '+e.message;
+  }
+}
+
+async function saveScript(runID){
+  const content=document.getElementById('scriptEditor').value;
+  try{
+    const res=await fetch(API+'/api/runs/'+runID+'/script',{
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({content})
+    });
+    if(!res.ok)throw new Error((await res.json()).error);
+    toast('Script kaydedildi!');
+  }catch(e){toast('Kaydetme hatasi: '+e.message,'error')}
+}
+
+async function retryRun(id){
+  try{
+    const res=await fetch(API+'/api/runs/'+id+'/retry',{method:'POST'});
+    if(!res.ok)throw new Error((await res.json()).error);
+    toast('Calistirma yeniden kuyruga alindi');
+    closeModal();fetchRuns();
+  }catch(e){toast('Hata: '+e.message,'error')}
+}
+
+async function deleteRun(id){
+  if(!confirm('Bu calistirmayi silmek istediginizden emin misiniz?'))return;
+  try{
+    const res=await fetch(API+'/api/runs/'+id,{method:'DELETE'});
+    if(!res.ok)throw new Error('Silme hatasi');
+    toast('Calistirma silindi');
+    closeModal();fetchRuns();
+  }catch(e){toast('Hata: '+e.message,'error')}
+}
+
+// -- Init --
+fetchRuns();
+refreshTimer=setInterval(fetchRuns,10000);
+</script>
+</body>
+</html>

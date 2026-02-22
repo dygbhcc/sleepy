@@ -36,12 +36,18 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// Frontend
+	mux.HandleFunc("GET /", handleIndex)
+
+	// API
 	mux.HandleFunc("GET /api/runs", handleListRuns)
 	mux.HandleFunc("POST /api/runs", handleCreateRun)
 	mux.HandleFunc("GET /api/runs/{id}", handleGetRun)
 	mux.HandleFunc("DELETE /api/runs/{id}", handleDeleteRun)
 	mux.HandleFunc("POST /api/runs/{id}/retry", handleRetryRun)
 	mux.HandleFunc("GET /api/runs/{id}/assets", handleListAssets)
+	mux.HandleFunc("GET /api/runs/{id}/script", handleGetScript)
+	mux.HandleFunc("PUT /api/runs/{id}/script", handleUpdateScript)
 	mux.HandleFunc("GET /assets/{runID}/{file}", handleServeAsset)
 
 	addr := os.Getenv("ADDR")
@@ -56,7 +62,7 @@ func main() {
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -246,4 +252,54 @@ func handleServeAsset(w http.ResponseWriter, r *http.Request) {
 
 	path := filepath.Join(assetRoot, runID, file)
 	http.ServeFile(w, r, path)
+}
+
+func handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, "web/index.html")
+}
+
+func handleGetScript(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	asset, err := store.GetAsset(r.Context(), id, domain.AssetScriptMD)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "script not found")
+		return
+	}
+
+	content, err := os.ReadFile(asset.Path)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot read script file")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(content)
+}
+
+func handleUpdateScript(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	asset, err := store.GetAsset(r.Context(), id, domain.AssetScriptMD)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "script not found")
+		return
+	}
+
+	if err := os.WriteFile(asset.Path, []byte(req.Content), 0644); err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot write script file")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, asset)
 }
