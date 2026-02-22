@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sleepy - Control Panel</title>
+<title>Sleepy</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -22,6 +22,24 @@ header span.subtitle{color:var(--text2);font-size:14px}
 .header-right{margin-left:auto;display:flex;align-items:center;gap:8px}
 .lang-select{background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:4px 8px;outline:none;cursor:pointer}
 .lang-select:focus{border-color:var(--accent)}
+.settings-btn{background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);font-size:16px;padding:4px 8px;cursor:pointer;display:flex;align-items:center;gap:4px;transition:all .15s}
+.settings-btn:hover{border-color:var(--accent);color:var(--accent)}
+.worker-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.worker-dot.on{background:var(--green)}.worker-dot.off{background:var(--text2)}
+
+/* Settings Modal */
+.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.settings-grid .form-group{margin-bottom:0}
+.settings-full{grid-column:1/-1}
+.mode-toggle{display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:16px}
+.mode-toggle button{flex:1;padding:8px 16px;border:none;background:var(--surface2);color:var(--text2);font-size:13px;font-weight:500;cursor:pointer;transition:all .15s}
+.mode-toggle button.active{background:var(--accent);color:#fff}
+.settings-section{margin-bottom:18px}
+.settings-section h3{font-size:13px;font-weight:600;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px}
+.worker-controls{display:flex;align-items:center;gap:12px;padding:16px 0;border-top:1px solid var(--border);margin-top:8px}
+.worker-status{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)}
+.btn-success{background:var(--green);color:#fff}.btn-success:hover{opacity:.85}
+.btn-warning{background:var(--yellow);color:#000}.btn-warning:hover{opacity:.85}
 
 /* Layout */
 .container{max-width:1400px;margin:0 auto;padding:24px}
@@ -130,6 +148,13 @@ tr:hover{background:var(--surface2);cursor:pointer}
   <h1>Sleepy</h1>
   <span class="subtitle" data-i18n="controlPanel"></span>
   <div class="header-right">
+    <div class="worker-status" id="workerIndicator">
+      <span class="worker-dot off" id="workerDot"></span>
+      <span id="workerLabel" data-i18n="workerStopped"></span>
+    </div>
+    <button class="settings-btn" onclick="openSettings()" title="Settings">
+      &#9881; <span data-i18n="settings"></span>
+    </button>
     <select class="lang-select" id="langSelect" onchange="setLang(this.value)">
       <option value="en">English</option>
       <option value="tr">Turkce</option>
@@ -222,6 +247,100 @@ tr:hover{background:var(--surface2);cursor:pointer}
   </div>
 </div>
 
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsOverlay" style="display:none" onclick="if(event.target===this)closeSettings()">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header">
+      <h2 data-i18n="settingsTitle"></h2>
+      <button class="modal-close" onclick="closeSettings()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <!-- Mode toggle -->
+      <div class="settings-section">
+        <h3 data-i18n="modeLabel"></h3>
+        <div class="mode-toggle">
+          <button id="modeTestBtn" onclick="setSettingsMode('test')" data-i18n="modeTest"></button>
+          <button id="modeProdBtn" onclick="setSettingsMode('prod')" data-i18n="modeProd"></button>
+        </div>
+      </div>
+
+      <!-- Test mode fields -->
+      <div id="testFields" class="settings-section">
+        <h3>Groq + Edge TTS</h3>
+        <div class="settings-grid">
+          <div class="form-group settings-full">
+            <label>Groq API Key</label>
+            <input type="password" id="sGroqKey" placeholder="gsk_...">
+          </div>
+          <div class="form-group">
+            <label data-i18n="edgeVoice"></label>
+            <input type="text" id="sEdgeVoice" placeholder="en-US-AndrewNeural">
+          </div>
+          <div class="form-group">
+            <label data-i18n="edgeRate"></label>
+            <input type="text" id="sEdgeRate" placeholder="-20%">
+          </div>
+        </div>
+      </div>
+
+      <!-- Prod mode fields -->
+      <div id="prodFields" class="settings-section" style="display:none">
+        <h3>OpenAI + ElevenLabs</h3>
+        <div class="settings-grid">
+          <div class="form-group settings-full">
+            <label>OpenAI API Key</label>
+            <input type="password" id="sOpenAIKey" placeholder="sk-...">
+          </div>
+          <div class="form-group">
+            <label data-i18n="openaiBaseUrl"></label>
+            <input type="text" id="sOpenAIBaseURL" placeholder="https://api.openai.com/v1">
+          </div>
+          <div class="form-group">
+            <label data-i18n="openaiModel"></label>
+            <input type="text" id="sOpenAIModel" placeholder="gpt-4o">
+          </div>
+          <div class="form-group settings-full">
+            <label>ElevenLabs API Key</label>
+            <input type="password" id="sElevenKey" placeholder="xi-...">
+          </div>
+          <div class="form-group">
+            <label data-i18n="elevenVoiceId"></label>
+            <input type="text" id="sElevenVoiceID">
+          </div>
+          <div class="form-group">
+            <label data-i18n="elevenModelId"></label>
+            <input type="text" id="sElevenModelID" placeholder="eleven_monolingual_v1">
+          </div>
+          <div class="form-group">
+            <label data-i18n="elevenSpeed"></label>
+            <input type="number" id="sElevenSpeed" step="0.05" min="0.25" max="4.0" value="0.80">
+          </div>
+        </div>
+      </div>
+
+      <!-- Common -->
+      <div class="settings-section">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="sNormalize" checked>
+          <span data-i18n="normalizeAudio"></span>
+        </label>
+      </div>
+
+      <button class="btn btn-primary btn-block" onclick="saveSettings()" data-i18n="saveSettings"></button>
+
+      <!-- Worker controls -->
+      <div class="worker-controls">
+        <button class="btn btn-success btn-sm" id="workerStartBtn" onclick="startWorker()" data-i18n="workerStart"></button>
+        <button class="btn btn-danger btn-sm" id="workerStopBtn" onclick="stopWorker()" style="display:none" data-i18n="workerStop"></button>
+        <div class="worker-status">
+          <span class="worker-dot off" id="settingsWorkerDot"></span>
+          <span id="settingsWorkerLabel" data-i18n="workerStopped"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ==================== i18n ====================
 const LANGS = {
@@ -265,6 +384,28 @@ const LANGS = {
     contentLanguage: 'Content Language',
     language: 'Language',
     langEn: 'English', langTr: 'Turkish', langPt: 'Portuguese', langEs: 'Spanish', langIt: 'Italian',
+    settings: 'Settings',
+    settingsTitle: 'Worker Settings',
+    modeLabel: 'Mode',
+    modeTest: 'Test (Groq + Edge TTS)',
+    modeProd: 'Prod (OpenAI + ElevenLabs)',
+    edgeVoice: 'Edge Voice',
+    edgeRate: 'Edge Rate',
+    openaiBaseUrl: 'Base URL',
+    openaiModel: 'Model',
+    elevenVoiceId: 'Voice ID',
+    elevenModelId: 'Model ID',
+    elevenSpeed: 'Speed',
+    normalizeAudio: 'Normalize audio (EBU R128)',
+    saveSettings: 'Save Settings',
+    settingsSaved: 'Settings saved!',
+    workerStart: 'Start Worker',
+    workerStop: 'Stop Worker',
+    workerRunning: 'Running',
+    workerStopped: 'Stopped',
+    workerStarted: 'Worker started!',
+    workerStoppedMsg: 'Worker stopped.',
+    missingApiKey: 'Please configure the required API keys first.',
   },
   tr: {
     controlPanel: 'Kontrol Paneli',
@@ -306,6 +447,28 @@ const LANGS = {
     contentLanguage: 'Icerik Dili',
     language: 'Dil',
     langEn: 'Ingilizce', langTr: 'Turkce', langPt: 'Portekizce', langEs: 'Ispanyolca', langIt: 'Italyanca',
+    settings: 'Ayarlar',
+    settingsTitle: 'Worker Ayarlari',
+    modeLabel: 'Mod',
+    modeTest: 'Test (Groq + Edge TTS)',
+    modeProd: 'Prod (OpenAI + ElevenLabs)',
+    edgeVoice: 'Edge Ses',
+    edgeRate: 'Edge Hiz',
+    openaiBaseUrl: 'Base URL',
+    openaiModel: 'Model',
+    elevenVoiceId: 'Ses ID',
+    elevenModelId: 'Model ID',
+    elevenSpeed: 'Hiz',
+    normalizeAudio: 'Ses normalizasyonu (EBU R128)',
+    saveSettings: 'Ayarlari Kaydet',
+    settingsSaved: 'Ayarlar kaydedildi!',
+    workerStart: 'Worker Baslat',
+    workerStop: 'Worker Durdur',
+    workerRunning: 'Calisiyor',
+    workerStopped: 'Durdu',
+    workerStarted: 'Worker baslatildi!',
+    workerStoppedMsg: 'Worker durduruldu.',
+    missingApiKey: 'Lutfen once gerekli API anahtarlarini yapilandirin.',
   },
   pt: {
     controlPanel: 'Painel de Controle',
@@ -347,6 +510,28 @@ const LANGS = {
     contentLanguage: 'Idioma do Conteudo',
     language: 'Idioma',
     langEn: 'Ingles', langTr: 'Turco', langPt: 'Portugues', langEs: 'Espanhol', langIt: 'Italiano',
+    settings: 'Configuracoes',
+    settingsTitle: 'Configuracoes do Worker',
+    modeLabel: 'Modo',
+    modeTest: 'Teste (Groq + Edge TTS)',
+    modeProd: 'Prod (OpenAI + ElevenLabs)',
+    edgeVoice: 'Voz Edge',
+    edgeRate: 'Taxa Edge',
+    openaiBaseUrl: 'URL Base',
+    openaiModel: 'Modelo',
+    elevenVoiceId: 'ID da Voz',
+    elevenModelId: 'ID do Modelo',
+    elevenSpeed: 'Velocidade',
+    normalizeAudio: 'Normalizar audio (EBU R128)',
+    saveSettings: 'Salvar Configuracoes',
+    settingsSaved: 'Configuracoes salvas!',
+    workerStart: 'Iniciar Worker',
+    workerStop: 'Parar Worker',
+    workerRunning: 'Executando',
+    workerStopped: 'Parado',
+    workerStarted: 'Worker iniciado!',
+    workerStoppedMsg: 'Worker parado.',
+    missingApiKey: 'Por favor, configure as chaves de API necessarias primeiro.',
   },
   es: {
     controlPanel: 'Panel de Control',
@@ -388,6 +573,28 @@ const LANGS = {
     contentLanguage: 'Idioma del Contenido',
     language: 'Idioma',
     langEn: 'Ingles', langTr: 'Turco', langPt: 'Portugues', langEs: 'Espanol', langIt: 'Italiano',
+    settings: 'Configuracion',
+    settingsTitle: 'Configuracion del Worker',
+    modeLabel: 'Modo',
+    modeTest: 'Prueba (Groq + Edge TTS)',
+    modeProd: 'Prod (OpenAI + ElevenLabs)',
+    edgeVoice: 'Voz Edge',
+    edgeRate: 'Velocidad Edge',
+    openaiBaseUrl: 'URL Base',
+    openaiModel: 'Modelo',
+    elevenVoiceId: 'ID de Voz',
+    elevenModelId: 'ID de Modelo',
+    elevenSpeed: 'Velocidad',
+    normalizeAudio: 'Normalizar audio (EBU R128)',
+    saveSettings: 'Guardar Configuracion',
+    settingsSaved: 'Configuracion guardada!',
+    workerStart: 'Iniciar Worker',
+    workerStop: 'Detener Worker',
+    workerRunning: 'Ejecutando',
+    workerStopped: 'Detenido',
+    workerStarted: 'Worker iniciado!',
+    workerStoppedMsg: 'Worker detenido.',
+    missingApiKey: 'Por favor, configure las claves de API necesarias primero.',
   },
   it: {
     controlPanel: 'Pannello di Controllo',
@@ -429,6 +636,28 @@ const LANGS = {
     contentLanguage: 'Lingua del Contenuto',
     language: 'Lingua',
     langEn: 'Inglese', langTr: 'Turco', langPt: 'Portoghese', langEs: 'Spagnolo', langIt: 'Italiano',
+    settings: 'Impostazioni',
+    settingsTitle: 'Impostazioni Worker',
+    modeLabel: 'Modalita',
+    modeTest: 'Test (Groq + Edge TTS)',
+    modeProd: 'Prod (OpenAI + ElevenLabs)',
+    edgeVoice: 'Voce Edge',
+    edgeRate: 'Velocita Edge',
+    openaiBaseUrl: 'URL Base',
+    openaiModel: 'Modello',
+    elevenVoiceId: 'ID Voce',
+    elevenModelId: 'ID Modello',
+    elevenSpeed: 'Velocita',
+    normalizeAudio: 'Normalizza audio (EBU R128)',
+    saveSettings: 'Salva Impostazioni',
+    settingsSaved: 'Impostazioni salvate!',
+    workerStart: 'Avvia Worker',
+    workerStop: 'Ferma Worker',
+    workerRunning: 'In esecuzione',
+    workerStopped: 'Fermato',
+    workerStarted: 'Worker avviato!',
+    workerStoppedMsg: 'Worker fermato.',
+    missingApiKey: 'Per favore, configura prima le chiavi API necessarie.',
   }
 };
 
@@ -588,7 +817,7 @@ async function openDetail(id){
 }
 
 function closeModal(){document.getElementById('modalOverlay').style.display='none'}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeSettings()}});
 
 function kindLabel(kind){
   const map={script_md:t('scriptMd'),script_ssml:t('scriptSsml'),narration_wav:t('narrationWav'),thumbnail_png:t('thumbnailPng'),video_mp4:t('videoMp4'),metadata_json:t('metadataJson'),episode_pack_zip:t('episodePack')};
@@ -779,11 +1008,125 @@ async function deleteRun(id){
   }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
 }
 
+// ==================== Settings ====================
+let settingsMode = 'test';
+
+function openSettings(){
+  document.getElementById('settingsOverlay').style.display='flex';
+  loadSettings();
+}
+function closeSettings(){document.getElementById('settingsOverlay').style.display='none'}
+
+function setSettingsMode(mode){
+  settingsMode=mode;
+  document.getElementById('modeTestBtn').className=mode==='test'?'active':'';
+  document.getElementById('modeProdBtn').className=mode==='prod'?'active':'';
+  document.getElementById('testFields').style.display=mode==='test'?'block':'none';
+  document.getElementById('prodFields').style.display=mode==='prod'?'block':'none';
+}
+
+async function loadSettings(){
+  try{
+    const res=await fetch(API+'/api/settings');
+    const s=await res.json();
+    setSettingsMode(s.mode||'test');
+    document.getElementById('sGroqKey').value=s.groq_api_key||'';
+    document.getElementById('sOpenAIKey').value=s.openai_api_key||'';
+    document.getElementById('sOpenAIBaseURL').value=s.openai_base_url||'';
+    document.getElementById('sOpenAIModel').value=s.openai_model||'';
+    document.getElementById('sElevenKey').value=s.elevenlabs_api_key||'';
+    document.getElementById('sElevenVoiceID').value=s.elevenlabs_voice_id||'';
+    document.getElementById('sElevenModelID').value=s.elevenlabs_model_id||'';
+    document.getElementById('sElevenSpeed').value=s.elevenlabs_speed||0.80;
+    document.getElementById('sEdgeVoice').value=s.edge_voice||'';
+    document.getElementById('sEdgeRate').value=s.edge_rate||'';
+    document.getElementById('sNormalize').checked=s.normalize!==false;
+  }catch(e){console.error('load settings:',e)}
+}
+
+async function saveSettings(){
+  const body={
+    mode:settingsMode,
+    groq_api_key:document.getElementById('sGroqKey').value,
+    openai_api_key:document.getElementById('sOpenAIKey').value,
+    openai_base_url:document.getElementById('sOpenAIBaseURL').value,
+    openai_model:document.getElementById('sOpenAIModel').value,
+    elevenlabs_api_key:document.getElementById('sElevenKey').value,
+    elevenlabs_voice_id:document.getElementById('sElevenVoiceID').value,
+    elevenlabs_model_id:document.getElementById('sElevenModelID').value,
+    elevenlabs_speed:parseFloat(document.getElementById('sElevenSpeed').value)||0.80,
+    edge_voice:document.getElementById('sEdgeVoice').value,
+    edge_rate:document.getElementById('sEdgeRate').value,
+    normalize:document.getElementById('sNormalize').checked
+  };
+  try{
+    const res=await fetch(API+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!res.ok)throw new Error((await res.json()).error);
+    toast(t('settingsSaved'));
+  }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
+}
+
+// ==================== Worker control ====================
+async function pollWorkerStatus(){
+  try{
+    const res=await fetch(API+'/api/worker/status');
+    const data=await res.json();
+    updateWorkerUI(data.running);
+  }catch(e){console.error('worker status:',e)}
+}
+
+function updateWorkerUI(running){
+  const dot=document.getElementById('workerDot');
+  const label=document.getElementById('workerLabel');
+  const sDot=document.getElementById('settingsWorkerDot');
+  const sLabel=document.getElementById('settingsWorkerLabel');
+  const startBtn=document.getElementById('workerStartBtn');
+  const stopBtn=document.getElementById('workerStopBtn');
+
+  if(running){
+    dot.className='worker-dot on';
+    label.textContent=t('workerRunning');
+    if(sDot){sDot.className='worker-dot on';sLabel.textContent=t('workerRunning')}
+    startBtn.style.display='none';
+    stopBtn.style.display='inline-block';
+  }else{
+    dot.className='worker-dot off';
+    label.textContent=t('workerStopped');
+    if(sDot){sDot.className='worker-dot off';sLabel.textContent=t('workerStopped')}
+    startBtn.style.display='inline-block';
+    stopBtn.style.display='none';
+  }
+}
+
+async function startWorker(){
+  try{
+    const res=await fetch(API+'/api/worker/start',{method:'POST'});
+    if(!res.ok){
+      const err=await res.json();
+      toast(err.error||t('missingApiKey'),'error');
+      return;
+    }
+    toast(t('workerStarted'));
+    pollWorkerStatus();
+  }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
+}
+
+async function stopWorker(){
+  try{
+    const res=await fetch(API+'/api/worker/stop',{method:'POST'});
+    if(!res.ok)throw new Error((await res.json()).error);
+    toast(t('workerStoppedMsg'));
+    pollWorkerStatus();
+  }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
+}
+
 // ==================== Init ====================
 document.getElementById('langSelect').value=currentLang;
 setLang(currentLang);
 fetchRuns();
 refreshTimer=setInterval(fetchRuns,10000);
+pollWorkerStatus();
+setInterval(pollWorkerStatus,5000);
 </script>
 </body>
 </html>

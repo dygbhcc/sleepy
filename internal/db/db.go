@@ -265,6 +265,43 @@ func (d *DB) ListJobs(ctx context.Context, runID string) ([]domain.Job, error) {
 	return jobs, rows.Err()
 }
 
+// ---------- worker_settings ----------
+
+// GetWorkerSettings reads the singleton worker settings row.
+func (d *DB) GetWorkerSettings(ctx context.Context) (*domain.WorkerSettings, error) {
+	s := &domain.WorkerSettings{}
+	err := d.pool.QueryRowContext(ctx,
+		`SELECT mode, groq_api_key, openai_api_key, openai_base_url, openai_model,
+		        elevenlabs_api_key, elevenlabs_voice_id, elevenlabs_model_id, elevenlabs_speed,
+		        edge_voice, edge_rate, normalize, updated_at
+		 FROM worker_settings WHERE id = 1`,
+	).Scan(&s.Mode, &s.GroqAPIKey, &s.OpenAIAPIKey, &s.OpenAIBaseURL, &s.OpenAIModel,
+		&s.ElevenLabsAPIKey, &s.ElevenLabsVoiceID, &s.ElevenLabsModelID, &s.ElevenLabsSpeed,
+		&s.EdgeVoice, &s.EdgeRate, &s.Normalize, &s.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("get worker settings: %w", err)
+	}
+	return s, nil
+}
+
+// SaveWorkerSettings updates the singleton worker settings row.
+func (d *DB) SaveWorkerSettings(ctx context.Context, s *domain.WorkerSettings) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE worker_settings SET
+			mode = $1, groq_api_key = $2, openai_api_key = $3, openai_base_url = $4, openai_model = $5,
+			elevenlabs_api_key = $6, elevenlabs_voice_id = $7, elevenlabs_model_id = $8, elevenlabs_speed = $9,
+			edge_voice = $10, edge_rate = $11, normalize = $12, updated_at = now()
+		 WHERE id = 1`,
+		s.Mode, s.GroqAPIKey, s.OpenAIAPIKey, s.OpenAIBaseURL, s.OpenAIModel,
+		s.ElevenLabsAPIKey, s.ElevenLabsVoiceID, s.ElevenLabsModelID, s.ElevenLabsSpeed,
+		s.EdgeVoice, s.EdgeRate, s.Normalize,
+	)
+	if err != nil {
+		return fmt.Errorf("save worker settings: %w", err)
+	}
+	return nil
+}
+
 // DeleteRun deletes a run and all associated assets and jobs (via CASCADE).
 func (d *DB) DeleteRun(ctx context.Context, id string) error {
 	res, err := d.pool.ExecContext(ctx, `DELETE FROM runs WHERE id = $1`, id)

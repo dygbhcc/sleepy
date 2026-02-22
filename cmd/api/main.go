@@ -13,10 +13,12 @@ import (
 	"sleepy/internal/db"
 	"sleepy/internal/domain"
 	"sleepy/internal/jobs"
+	"sleepy/internal/worker"
 )
 
 var store *db.DB
 var assetRoot string
+var workerMgr *worker.Manager
 
 func main() {
 	dsn := os.Getenv("PG_DSN")
@@ -35,6 +37,8 @@ func main() {
 	}
 	defer store.Close()
 
+	workerMgr = worker.NewManager(store, assetRoot)
+
 	mux := http.NewServeMux()
 
 	// Frontend
@@ -50,6 +54,11 @@ func main() {
 	mux.HandleFunc("GET /api/runs/{id}/script", handleGetScript)
 	mux.HandleFunc("PUT /api/runs/{id}/script", handleUpdateScript)
 	mux.HandleFunc("PUT /api/runs/{id}/thumbnail", handleUpdateThumbnail)
+	mux.HandleFunc("GET /api/settings", handleGetSettings)
+	mux.HandleFunc("PUT /api/settings", handleUpdateSettings)
+	mux.HandleFunc("POST /api/worker/start", handleWorkerStart)
+	mux.HandleFunc("POST /api/worker/stop", handleWorkerStop)
+	mux.HandleFunc("GET /api/worker/status", handleWorkerStatus)
 	mux.HandleFunc("GET /assets/{runID}/{file}", handleServeAsset)
 
 	addr := os.Getenv("ADDR")
@@ -308,6 +317,151 @@ func handleUpdateScript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, asset)
+}
+
+// maskKey returns the last 4 characters of a key, or empty if too short.
+func maskKey(key string) string {
+	if len(key) <= 4 {
+		return key
+	}
+	return strings.Repeat("*", len(key)-4) + key[len(key)-4:]
+}
+
+func handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	s, err := store.GetWorkerSettings(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"mode":               s.Mode,
+		"groq_api_key":       maskKey(s.GroqAPIKey),
+		"openai_api_key":     maskKey(s.OpenAIAPIKey),
+		"openai_base_url":    s.OpenAIBaseURL,
+		"openai_model":       s.OpenAIModel,
+		"elevenlabs_api_key": maskKey(s.ElevenLabsAPIKey),
+		"elevenlabs_voice_id": s.ElevenLabsVoiceID,
+		"elevenlabs_model_id": s.ElevenLabsModelID,
+		"elevenlabs_speed":   s.ElevenLabsSpeed,
+		"edge_voice":         s.EdgeVoice,
+		"edge_rate":          s.EdgeRate,
+		"normalize":          s.Normalize,
+		"updated_at":         s.UpdatedAt,
+	})
+}
+
+func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Mode              *string  `json:"mode"`
+		GroqAPIKey        *string  `json:"groq_api_key"`
+		OpenAIAPIKey      *string  `json:"openai_api_key"`
+		OpenAIBaseURL     *string  `json:"openai_base_url"`
+		OpenAIModel       *string  `json:"openai_model"`
+		ElevenLabsAPIKey  *string  `json:"elevenlabs_api_key"`
+		ElevenLabsVoiceID *string  `json:"elevenlabs_voice_id"`
+		ElevenLabsModelID *string  `json:"elevenlabs_model_id"`
+		ElevenLabsSpeed   *float64 `json:"elevenlabs_speed"`
+		EdgeVoice         *string  `json:"edge_voice"`
+		EdgeRate          *string  `json:"edge_rate"`
+		Normalize         *bool    `json:"normalize"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	// Load current settings for partial update
+	s, err := store.GetWorkerSettings(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if req.Mode != nil {
+		s.Mode = *req.Mode
+	}
+	if req.GroqAPIKey != nil && *req.GroqAPIKey != "" && !strings.HasPrefix(*req.GroqAPIKey, "***") {
+		s.GroqAPIKey = *req.GroqAPIKey
+	}
+	if req.OpenAIAPIKey != nil && *req.OpenAIAPIKey != "" && !strings.HasPrefix(*req.OpenAIAPIKey, "***") {
+		s.OpenAIAPIKey = *req.OpenAIAPIKey
+	}
+	if req.OpenAIBaseURL != nil {
+		s.OpenAIBaseURL = *req.OpenAIBaseURL
+	}
+	if req.OpenAIModel != nil {
+		s.OpenAIModel = *req.OpenAIModel
+	}
+	if req.ElevenLabsAPIKey != nil && *req.ElevenLabsAPIKey != "" && !strings.HasPrefix(*req.ElevenLabsAPIKey, "***") {
+		s.ElevenLabsAPIKey = *req.ElevenLabsAPIKey
+	}
+	if req.ElevenLabsVoiceID != nil {
+		s.ElevenLabsVoiceID = *req.ElevenLabsVoiceID
+	}
+	if req.ElevenLabsModelID != nil {
+		s.ElevenLabsModelID = *req.ElevenLabsModelID
+	}
+	if req.ElevenLabsSpeed != nil {
+		s.ElevenLabsSpeed = *req.ElevenLabsSpeed
+	}
+	if req.EdgeVoice != nil {
+		s.EdgeVoice = *req.EdgeVoice
+	}
+	if req.EdgeRate != nil {
+		s.EdgeRate = *req.EdgeRate
+	}
+	if req.Normalize != nil {
+		s.Normalize = *req.Normalize
+	}
+
+	if err := store.SaveWorkerSettings(r.Context(), s); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func handleWorkerStart(w http.ResponseWriter, r *http.Request) {
+	s, err := store.GetWorkerSettings(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Validate required API keys
+	if s.Mode == "test" && s.GroqAPIKey == "" {
+		writeErr(w, http.StatusBadRequest, "Groq API key is required for test mode")
+		return
+	}
+	if s.Mode == "prod" {
+		if s.OpenAIAPIKey == "" {
+			writeErr(w, http.StatusBadRequest, "OpenAI API key is required for prod mode")
+			return
+		}
+		if s.ElevenLabsAPIKey == "" {
+			writeErr(w, http.StatusBadRequest, "ElevenLabs API key is required for prod mode")
+			return
+		}
+		if s.ElevenLabsVoiceID == "" {
+			writeErr(w, http.StatusBadRequest, "ElevenLabs Voice ID is required for prod mode")
+			return
+		}
+	}
+
+	if err := workerMgr.Start(s); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
+}
+
+func handleWorkerStop(w http.ResponseWriter, r *http.Request) {
+	workerMgr.Stop()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+func handleWorkerStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{"running": workerMgr.Running()})
 }
 
 func handleUpdateThumbnail(w http.ResponseWriter, r *http.Request) {

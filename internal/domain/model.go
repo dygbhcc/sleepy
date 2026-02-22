@@ -37,6 +37,23 @@ type Job struct {
 	FinishedAt *time.Time
 }
 
+// WorkerSettings holds the singleton worker configuration.
+type WorkerSettings struct {
+	Mode              string
+	GroqAPIKey        string
+	OpenAIAPIKey      string
+	OpenAIBaseURL     string
+	OpenAIModel       string
+	ElevenLabsAPIKey  string
+	ElevenLabsVoiceID string
+	ElevenLabsModelID string
+	ElevenLabsSpeed   float64
+	EdgeVoice         string
+	EdgeRate          string
+	Normalize         bool
+	UpdatedAt         time.Time
+}
+
 // Asset kind constants.
 const (
 	AssetScriptMD    = "script_md"
