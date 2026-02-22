@@ -50,7 +50,12 @@ func stepTTS(ctx context.Context, deps Deps, run *domain.Run) error {
 	}
 
 	outPath := deps.Store.Path(run.ID, "narration.wav")
-	if err := deps.TTS.Synthesize(ctx, text, outPath); err != nil {
+	// Use language-aware synthesis if the TTS provider supports it.
+	if laTTS, ok := deps.TTS.(LanguageAwareTTS); ok && run.Language != "" {
+		if err := laTTS.SynthesizeWithLang(ctx, text, outPath, run.Language); err != nil {
+			return fmt.Errorf("tts synthesize: %w", err)
+		}
+	} else if err := deps.TTS.Synthesize(ctx, text, outPath); err != nil {
 		return fmt.Errorf("tts synthesize: %w", err)
 	}
 

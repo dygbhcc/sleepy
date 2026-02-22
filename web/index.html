@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sleepy - Kontrol Paneli</title>
+<title>Sleepy - Control Panel</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -18,7 +18,10 @@ a{color:var(--accent);text-decoration:none}
 /* Header */
 header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:100}
 header h1{font-size:20px;font-weight:700;background:linear-gradient(135deg,var(--accent),#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-header span{color:var(--text2);font-size:14px}
+header span.subtitle{color:var(--text2);font-size:14px}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.lang-select{background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:4px 8px;outline:none;cursor:pointer}
+.lang-select:focus{border-color:var(--accent)}
 
 /* Layout */
 .container{max-width:1400px;margin:0 auto;padding:24px}
@@ -99,6 +102,14 @@ tr:hover{background:var(--surface2);cursor:pointer}
 .thumb-preview{max-width:100%;border-radius:6px;margin-top:8px}
 .video-player{width:100%;border-radius:6px;margin-top:8px}
 
+/* Thumbnail upload */
+.thumb-upload{display:flex;align-items:center;gap:10px;margin-top:10px}
+.thumb-upload input[type=file]{display:none}
+.thumb-upload-label{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:var(--surface2);border:1px dashed var(--border);border-radius:6px;color:var(--text2);font-size:12px;cursor:pointer;transition:all .15s}
+.thumb-upload-label:hover{border-color:var(--accent);color:var(--accent)}
+.thumb-drop-zone{border:2px dashed var(--border);border-radius:8px;padding:24px;text-align:center;color:var(--text2);font-size:13px;margin-top:10px;transition:all .15s}
+.thumb-drop-zone.dragover{border-color:var(--accent);background:rgba(99,102,241,.08);color:var(--accent)}
+
 /* Error box */
 .error-box{background:#ef444415;border:1px solid var(--red);border-radius:6px;padding:12px;color:var(--red);font-size:13px;margin-bottom:16px;white-space:pre-wrap}
 
@@ -117,25 +128,34 @@ tr:hover{background:var(--surface2);cursor:pointer}
 
 <header>
   <h1>Sleepy</h1>
-  <span>Kontrol Paneli</span>
+  <span class="subtitle" data-i18n="controlPanel"></span>
+  <div class="header-right">
+    <select class="lang-select" id="langSelect" onchange="setLang(this.value)">
+      <option value="en">English</option>
+      <option value="tr">Turkce</option>
+      <option value="pt">Portugues</option>
+      <option value="es">Espanol</option>
+      <option value="it">Italiano</option>
+    </select>
+  </div>
 </header>
 
 <div class="container">
   <div class="top-row">
     <!-- Create Form -->
     <div class="card">
-      <h2>Yeni Bolum Olustur</h2>
+      <h2 data-i18n="createEpisode"></h2>
       <form id="createForm">
         <div class="form-group">
-          <label>Series</label>
-          <input type="text" id="fSeries" placeholder="Ornek: Uzay Hikayeleri" required>
+          <label data-i18n="series"></label>
+          <input type="text" id="fSeries" data-i18n-placeholder="seriesPlaceholder" required>
         </div>
         <div class="form-group">
-          <label>Episode</label>
-          <input type="text" id="fEpisode" placeholder="Ornek: Saturnun Halkalari" required>
+          <label data-i18n="episode"></label>
+          <input type="text" id="fEpisode" data-i18n-placeholder="episodePlaceholder" required>
         </div>
         <div class="form-group">
-          <label>Style</label>
+          <label data-i18n="style"></label>
           <select id="fStyle">
             <option value="Cosmos">Cosmos</option>
             <option value="Earthside">Earthside</option>
@@ -143,29 +163,45 @@ tr:hover{background:var(--surface2);cursor:pointer}
           </select>
         </div>
         <div class="form-group">
-          <label>Sure (dakika)</label>
+          <label data-i18n="contentLanguage"></label>
+          <select id="fLanguage">
+            <option value="en">English</option>
+            <option value="tr">Turkce</option>
+            <option value="pt">Portugues</option>
+            <option value="es">Espanol</option>
+            <option value="it">Italiano</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label data-i18n="durationMin"></label>
           <input type="number" id="fDuration" value="30" min="1" max="180">
         </div>
-        <button type="submit" class="btn btn-primary btn-block">Olustur</button>
+        <button type="submit" class="btn btn-primary btn-block" data-i18n="create"></button>
       </form>
     </div>
 
     <!-- Stats -->
     <div class="card">
-      <h2>Ozet</h2>
+      <h2 data-i18n="summary"></h2>
       <div id="statsArea" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px"></div>
     </div>
   </div>
 
   <!-- Runs Table -->
   <div class="card">
-    <h2>Tum Calistirmalar</h2>
+    <h2 data-i18n="allRuns"></h2>
     <div class="filters" id="filterBar"></div>
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Series</th><th>Episode</th><th>Style</th><th>Sure</th><th>Durum</th><th>Tarih</th>
+            <th data-i18n="series"></th>
+            <th data-i18n="episode"></th>
+            <th data-i18n="style"></th>
+            <th data-i18n="language"></th>
+            <th data-i18n="duration"></th>
+            <th data-i18n="status"></th>
+            <th data-i18n="date"></th>
           </tr>
         </thead>
         <tbody id="runsBody"></tbody>
@@ -178,7 +214,7 @@ tr:hover{background:var(--surface2);cursor:pointer}
 <div class="modal-overlay" id="modalOverlay" style="display:none" onclick="if(event.target===this)closeModal()">
   <div class="modal">
     <div class="modal-header">
-      <h2 id="modalTitle">Run Detay</h2>
+      <h2 id="modalTitle"></h2>
       <button class="modal-close" onclick="closeModal()">&times;</button>
     </div>
     <div class="modal-body" id="modalBody"></div>
@@ -187,6 +223,239 @@ tr:hover{background:var(--surface2);cursor:pointer}
 </div>
 
 <script>
+// ==================== i18n ====================
+const LANGS = {
+  en: {
+    controlPanel: 'Control Panel',
+    createEpisode: 'Create New Episode',
+    series: 'Series', episode: 'Episode', style: 'Style',
+    durationMin: 'Duration (minutes)', duration: 'Duration',
+    create: 'Create', summary: 'Summary', allRuns: 'All Runs',
+    status: 'Status', date: 'Date',
+    seriesPlaceholder: 'e.g. Space Stories',
+    episodePlaceholder: 'e.g. Rings of Saturn',
+    total: 'Total', pending: 'Pending', inProgress: 'In Progress',
+    completed: 'Completed', failed: 'Failed',
+    noRunsYet: 'No runs yet',
+    loading: 'Loading...', loadError: 'Loading error',
+    error: 'Error',
+    generatedFiles: 'Generated Files',
+    viewDownload: 'View / Download',
+    thumbnail: 'Thumbnail', noThumbnail: 'No thumbnail yet',
+    selectImage: 'Select Image', uploading: 'Uploading...',
+    dropImageHere: 'Or drag and drop an image here',
+    video: 'Video', videoNotSupported: 'Your browser does not support video.',
+    scriptLoading: 'Loading script...', scriptLoadError: 'Could not load script',
+    save: 'Save', reset: 'Reset',
+    retry: 'Retry', delete: 'Delete',
+    runCreated: 'Run created!', errorPrefix: 'Error',
+    scriptSaved: 'Script saved!', scriptSaveError: 'Save error',
+    thumbnailUpdated: 'Thumbnail updated!',
+    uploadError: 'Upload error', onlyImages: 'Only image files are allowed',
+    runRequeued: 'Run re-queued',
+    runDeleted: 'Run deleted', deleteError: 'Delete error',
+    confirmDelete: 'Are you sure you want to delete this run?',
+    createdAt: 'Created',
+    minuteShort: 'min', minuteLong: 'minutes',
+    scriptMd: 'Script (MD)', scriptSsml: 'Script (SSML)',
+    narrationWav: 'Audio File', thumbnailPng: 'Thumbnail',
+    videoMp4: 'Video', metadataJson: 'Metadata',
+    episodePack: 'Episode Pack',
+    onlyFailedRetry: 'Only FAILED runs can be retried',
+    contentLanguage: 'Content Language',
+    language: 'Language',
+    langEn: 'English', langTr: 'Turkish', langPt: 'Portuguese', langEs: 'Spanish', langIt: 'Italian',
+  },
+  tr: {
+    controlPanel: 'Kontrol Paneli',
+    createEpisode: 'Yeni Bolum Olustur',
+    series: 'Seri', episode: 'Bolum', style: 'Stil',
+    durationMin: 'Sure (dakika)', duration: 'Sure',
+    create: 'Olustur', summary: 'Ozet', allRuns: 'Tum Calistirmalar',
+    status: 'Durum', date: 'Tarih',
+    seriesPlaceholder: 'Ornek: Uzay Hikayeleri',
+    episodePlaceholder: 'Ornek: Saturnun Halkalari',
+    total: 'Toplam', pending: 'Bekleyen', inProgress: 'Devam Eden',
+    completed: 'Tamamlanan', failed: 'Basarisiz',
+    noRunsYet: 'Henuz calistirma yok',
+    loading: 'Yukleniyor...', loadError: 'Yukleme hatasi',
+    error: 'Hata',
+    generatedFiles: 'Uretilen Dosyalar',
+    viewDownload: 'Goruntule / Indir',
+    thumbnail: 'Thumbnail', noThumbnail: 'Henuz thumbnail yok',
+    selectImage: 'Gorsel Sec', uploading: 'Yukleniyor...',
+    dropImageHere: 'Veya gorseli buraya surukleyin',
+    video: 'Video', videoNotSupported: 'Tarayiciniz video desteklemiyor.',
+    scriptLoading: 'Script yukleniyor...', scriptLoadError: 'Script yuklenemedi',
+    save: 'Kaydet', reset: 'Sifirla',
+    retry: 'Tekrar Dene', delete: 'Sil',
+    runCreated: 'Calistirma olusturuldu!', errorPrefix: 'Hata',
+    scriptSaved: 'Script kaydedildi!', scriptSaveError: 'Kaydetme hatasi',
+    thumbnailUpdated: 'Thumbnail guncellendi!',
+    uploadError: 'Yukleme hatasi', onlyImages: 'Sadece gorsel dosyalari yuklenebilir',
+    runRequeued: 'Calistirma yeniden kuyruga alindi',
+    runDeleted: 'Calistirma silindi', deleteError: 'Silme hatasi',
+    confirmDelete: 'Bu calistirmayi silmek istediginizden emin misiniz?',
+    createdAt: 'Olusturulma',
+    minuteShort: 'dk', minuteLong: 'dakika',
+    scriptMd: 'Script (MD)', scriptSsml: 'Script (SSML)',
+    narrationWav: 'Ses Dosyasi', thumbnailPng: 'Thumbnail',
+    videoMp4: 'Video', metadataJson: 'Metadata',
+    episodePack: 'Bolum Paketi',
+    onlyFailedRetry: 'Sadece FAILED calistirmalar tekrar denenebilir',
+    contentLanguage: 'Icerik Dili',
+    language: 'Dil',
+    langEn: 'Ingilizce', langTr: 'Turkce', langPt: 'Portekizce', langEs: 'Ispanyolca', langIt: 'Italyanca',
+  },
+  pt: {
+    controlPanel: 'Painel de Controle',
+    createEpisode: 'Criar Novo Episodio',
+    series: 'Serie', episode: 'Episodio', style: 'Estilo',
+    durationMin: 'Duracao (minutos)', duration: 'Duracao',
+    create: 'Criar', summary: 'Resumo', allRuns: 'Todas as Execucoes',
+    status: 'Status', date: 'Data',
+    seriesPlaceholder: 'Ex: Historias Espaciais',
+    episodePlaceholder: 'Ex: Aneis de Saturno',
+    total: 'Total', pending: 'Pendente', inProgress: 'Em Andamento',
+    completed: 'Concluido', failed: 'Falhou',
+    noRunsYet: 'Nenhuma execucao ainda',
+    loading: 'Carregando...', loadError: 'Erro ao carregar',
+    error: 'Erro',
+    generatedFiles: 'Arquivos Gerados',
+    viewDownload: 'Ver / Baixar',
+    thumbnail: 'Thumbnail', noThumbnail: 'Nenhum thumbnail ainda',
+    selectImage: 'Selecionar Imagem', uploading: 'Enviando...',
+    dropImageHere: 'Ou arraste e solte uma imagem aqui',
+    video: 'Video', videoNotSupported: 'Seu navegador nao suporta video.',
+    scriptLoading: 'Carregando script...', scriptLoadError: 'Nao foi possivel carregar o script',
+    save: 'Salvar', reset: 'Redefinir',
+    retry: 'Tentar Novamente', delete: 'Excluir',
+    runCreated: 'Execucao criada!', errorPrefix: 'Erro',
+    scriptSaved: 'Script salvo!', scriptSaveError: 'Erro ao salvar',
+    thumbnailUpdated: 'Thumbnail atualizado!',
+    uploadError: 'Erro no envio', onlyImages: 'Apenas arquivos de imagem sao permitidos',
+    runRequeued: 'Execucao reenfileirada',
+    runDeleted: 'Execucao excluida', deleteError: 'Erro ao excluir',
+    confirmDelete: 'Tem certeza de que deseja excluir esta execucao?',
+    createdAt: 'Criado em',
+    minuteShort: 'min', minuteLong: 'minutos',
+    scriptMd: 'Script (MD)', scriptSsml: 'Script (SSML)',
+    narrationWav: 'Arquivo de Audio', thumbnailPng: 'Thumbnail',
+    videoMp4: 'Video', metadataJson: 'Metadata',
+    episodePack: 'Pacote do Episodio',
+    onlyFailedRetry: 'Apenas execucoes com falha podem ser retentadas',
+    contentLanguage: 'Idioma do Conteudo',
+    language: 'Idioma',
+    langEn: 'Ingles', langTr: 'Turco', langPt: 'Portugues', langEs: 'Espanhol', langIt: 'Italiano',
+  },
+  es: {
+    controlPanel: 'Panel de Control',
+    createEpisode: 'Crear Nuevo Episodio',
+    series: 'Serie', episode: 'Episodio', style: 'Estilo',
+    durationMin: 'Duracion (minutos)', duration: 'Duracion',
+    create: 'Crear', summary: 'Resumen', allRuns: 'Todas las Ejecuciones',
+    status: 'Estado', date: 'Fecha',
+    seriesPlaceholder: 'Ej: Historias Espaciales',
+    episodePlaceholder: 'Ej: Anillos de Saturno',
+    total: 'Total', pending: 'Pendiente', inProgress: 'En Progreso',
+    completed: 'Completado', failed: 'Fallido',
+    noRunsYet: 'No hay ejecuciones aun',
+    loading: 'Cargando...', loadError: 'Error de carga',
+    error: 'Error',
+    generatedFiles: 'Archivos Generados',
+    viewDownload: 'Ver / Descargar',
+    thumbnail: 'Thumbnail', noThumbnail: 'No hay thumbnail aun',
+    selectImage: 'Seleccionar Imagen', uploading: 'Subiendo...',
+    dropImageHere: 'O arrastra y suelta una imagen aqui',
+    video: 'Video', videoNotSupported: 'Su navegador no soporta video.',
+    scriptLoading: 'Cargando script...', scriptLoadError: 'No se pudo cargar el script',
+    save: 'Guardar', reset: 'Restablecer',
+    retry: 'Reintentar', delete: 'Eliminar',
+    runCreated: 'Ejecucion creada!', errorPrefix: 'Error',
+    scriptSaved: 'Script guardado!', scriptSaveError: 'Error al guardar',
+    thumbnailUpdated: 'Thumbnail actualizado!',
+    uploadError: 'Error de subida', onlyImages: 'Solo se permiten archivos de imagen',
+    runRequeued: 'Ejecucion reencolada',
+    runDeleted: 'Ejecucion eliminada', deleteError: 'Error al eliminar',
+    confirmDelete: 'Esta seguro de que desea eliminar esta ejecucion?',
+    createdAt: 'Creado',
+    minuteShort: 'min', minuteLong: 'minutos',
+    scriptMd: 'Script (MD)', scriptSsml: 'Script (SSML)',
+    narrationWav: 'Archivo de Audio', thumbnailPng: 'Thumbnail',
+    videoMp4: 'Video', metadataJson: 'Metadata',
+    episodePack: 'Paquete del Episodio',
+    onlyFailedRetry: 'Solo las ejecuciones fallidas pueden reintentarse',
+    contentLanguage: 'Idioma del Contenido',
+    language: 'Idioma',
+    langEn: 'Ingles', langTr: 'Turco', langPt: 'Portugues', langEs: 'Espanol', langIt: 'Italiano',
+  },
+  it: {
+    controlPanel: 'Pannello di Controllo',
+    createEpisode: 'Crea Nuovo Episodio',
+    series: 'Serie', episode: 'Episodio', style: 'Stile',
+    durationMin: 'Durata (minuti)', duration: 'Durata',
+    create: 'Crea', summary: 'Riepilogo', allRuns: 'Tutte le Esecuzioni',
+    status: 'Stato', date: 'Data',
+    seriesPlaceholder: 'Es: Storie Spaziali',
+    episodePlaceholder: 'Es: Anelli di Saturno',
+    total: 'Totale', pending: 'In Attesa', inProgress: 'In Corso',
+    completed: 'Completato', failed: 'Fallito',
+    noRunsYet: 'Nessuna esecuzione ancora',
+    loading: 'Caricamento...', loadError: 'Errore di caricamento',
+    error: 'Errore',
+    generatedFiles: 'File Generati',
+    viewDownload: 'Visualizza / Scarica',
+    thumbnail: 'Thumbnail', noThumbnail: 'Nessun thumbnail ancora',
+    selectImage: 'Seleziona Immagine', uploading: 'Caricamento...',
+    dropImageHere: 'Oppure trascina e rilascia un\'immagine qui',
+    video: 'Video', videoNotSupported: 'Il tuo browser non supporta il video.',
+    scriptLoading: 'Caricamento script...', scriptLoadError: 'Impossibile caricare lo script',
+    save: 'Salva', reset: 'Ripristina',
+    retry: 'Riprova', delete: 'Elimina',
+    runCreated: 'Esecuzione creata!', errorPrefix: 'Errore',
+    scriptSaved: 'Script salvato!', scriptSaveError: 'Errore di salvataggio',
+    thumbnailUpdated: 'Thumbnail aggiornato!',
+    uploadError: 'Errore di caricamento', onlyImages: 'Sono consentiti solo file immagine',
+    runRequeued: 'Esecuzione rimessa in coda',
+    runDeleted: 'Esecuzione eliminata', deleteError: 'Errore di eliminazione',
+    confirmDelete: 'Sei sicuro di voler eliminare questa esecuzione?',
+    createdAt: 'Creato',
+    minuteShort: 'min', minuteLong: 'minuti',
+    scriptMd: 'Script (MD)', scriptSsml: 'Script (SSML)',
+    narrationWav: 'File Audio', thumbnailPng: 'Thumbnail',
+    videoMp4: 'Video', metadataJson: 'Metadata',
+    episodePack: 'Pacchetto Episodio',
+    onlyFailedRetry: 'Solo le esecuzioni fallite possono essere ritentate',
+    contentLanguage: 'Lingua del Contenuto',
+    language: 'Lingua',
+    langEn: 'Inglese', langTr: 'Turco', langPt: 'Portoghese', langEs: 'Spagnolo', langIt: 'Italiano',
+  }
+};
+
+let currentLang = localStorage.getItem('sleepy-lang') || 'en';
+
+function t(key){ return (LANGS[currentLang] && LANGS[currentLang][key]) || LANGS.en[key] || key; }
+
+function setLang(lang){
+  currentLang = lang;
+  localStorage.setItem('sleepy-lang', lang);
+  document.getElementById('langSelect').value = lang;
+  document.documentElement.lang = lang;
+  document.title = 'Sleepy - ' + t('controlPanel');
+  applyI18n();
+  renderStats(); renderFilters(); renderTable();
+}
+
+function applyI18n(){
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{
+    el.placeholder = t(el.dataset.i18nPlaceholder);
+  });
+}
+
+// ==================== App State ====================
 const API = '';
 let allRuns = [];
 let currentFilter = 'ALL';
@@ -202,21 +471,33 @@ function statusClass(s){
   return 'badge-progress';
 }
 
+function dateLang(){
+  const map={en:'en-US',tr:'tr-TR',pt:'pt-BR',es:'es-ES',it:'it-IT'};
+  return map[currentLang]||'en-US';
+}
+
 function fmtDate(d){
   if(!d)return '-';
   const dt=new Date(d);
-  return dt.toLocaleDateString('tr-TR')+' '+dt.toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+  return dt.toLocaleDateString(dateLang())+' '+dt.toLocaleTimeString(dateLang(),{hour:'2-digit',minute:'2-digit'});
 }
 
 function toast(msg,type='success'){
-  const t=document.createElement('div');
-  t.className='toast toast-'+type;
-  t.textContent=msg;
-  document.body.appendChild(t);
-  setTimeout(()=>t.remove(),3000);
+  const el=document.createElement('div');
+  el.className='toast toast-'+type;
+  el.textContent=msg;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(),3000);
 }
 
-// -- Filters --
+function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
+
+function langDisplay(code){
+  const map={en:'langEn',tr:'langTr',pt:'langPt',es:'langEs',it:'langIt'};
+  return t(map[code]||'langEn');
+}
+
+// ==================== Filters ====================
 function renderFilters(){
   const bar=document.getElementById('filterBar');
   bar.innerHTML='';
@@ -230,41 +511,40 @@ function renderFilters(){
   });
 }
 
-// -- Stats --
+// ==================== Stats ====================
 function renderStats(){
   const area=document.getElementById('statsArea');
   const counts={};
   STATUSES.slice(1).forEach(s=>counts[s]=0);
   allRuns.forEach(r=>counts[r.Status]=(counts[r.Status]||0)+1);
   area.innerHTML='';
-  [['Toplam',allRuns.length,'var(--accent)'],['Bekleyen',counts.PENDING||0,'var(--yellow)'],['Devam Eden',(counts.SCRIPTED||0)+(counts.VOICED||0)+(counts.THUMBNAILED||0)+(counts.RENDERED||0)+(counts.PACKAGED||0),'var(--blue)'],['Tamamlanan',counts.DONE||0,'var(--green)'],['Basarisiz',counts.FAILED||0,'var(--red)']].forEach(([label,val,color])=>{
+  [[t('total'),allRuns.length,'var(--accent)'],[t('pending'),counts.PENDING||0,'var(--yellow)'],[t('inProgress'),(counts.SCRIPTED||0)+(counts.VOICED||0)+(counts.THUMBNAILED||0)+(counts.RENDERED||0)+(counts.PACKAGED||0),'var(--blue)'],[t('completed'),counts.DONE||0,'var(--green)'],[t('failed'),counts.FAILED||0,'var(--red)']].forEach(([label,val,color])=>{
     area.innerHTML+=`<div style="background:var(--surface2);border-radius:8px;padding:16px;text-align:center">
       <div style="font-size:28px;font-weight:700;color:${color}">${val}</div>
       <div style="font-size:12px;color:var(--text2);margin-top:4px">${label}</div></div>`;
   });
 }
 
-// -- Table --
+// ==================== Table ====================
 function renderTable(){
   const body=document.getElementById('runsBody');
   const filtered=currentFilter==='ALL'?allRuns:allRuns.filter(r=>r.Status===currentFilter);
   if(!filtered.length){
-    body.innerHTML='<tr class="empty-row"><td colspan="6">Henuz calistirma yok</td></tr>';
+    body.innerHTML=`<tr class="empty-row"><td colspan="7">${t('noRunsYet')}</td></tr>`;
     return;
   }
   body.innerHTML=filtered.map(r=>`<tr onclick="openDetail('${r.ID}')">
     <td>${esc(r.Series)}</td>
     <td>${esc(r.Episode)}</td>
     <td>${esc(r.Style)}</td>
-    <td>${r.DurationMin} dk</td>
+    <td>${langDisplay(r.Language)}</td>
+    <td>${r.DurationMin} ${t('minuteShort')}</td>
     <td><span class="badge ${statusClass(r.Status)}">${r.Status}</span></td>
     <td>${fmtDate(r.CreatedAt)}</td>
   </tr>`).join('');
 }
 
-function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
-
-// -- Fetch runs --
+// ==================== Fetch runs ====================
 async function fetchRuns(){
   try{
     const res=await fetch(API+'/api/runs');
@@ -273,46 +553,51 @@ async function fetchRuns(){
   }catch(e){console.error('fetch runs:',e)}
 }
 
-// -- Create run --
+// ==================== Create run ====================
 document.getElementById('createForm').onsubmit=async(e)=>{
   e.preventDefault();
   const body={
     series:document.getElementById('fSeries').value.trim(),
     episode:document.getElementById('fEpisode').value.trim(),
     style:document.getElementById('fStyle').value,
+    language:document.getElementById('fLanguage').value,
     duration_min:parseInt(document.getElementById('fDuration').value)||30
   };
   try{
     const res=await fetch(API+'/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!res.ok)throw new Error((await res.json()).error);
-    toast('Calistirma olusturuldu!');
+    toast(t('runCreated'));
     document.getElementById('createForm').reset();
     document.getElementById('fDuration').value='30';
     fetchRuns();
-  }catch(e){toast('Hata: '+e.message,'error')}
+  }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
 };
 
-// -- Detail modal --
+// ==================== Detail modal ====================
 async function openDetail(id){
   document.getElementById('modalOverlay').style.display='flex';
-  document.getElementById('modalBody').innerHTML='<p style="color:var(--text2)">Yukleniyor...</p>';
+  document.getElementById('modalBody').innerHTML=`<p style="color:var(--text2)">${t('loading')}</p>`;
   document.getElementById('modalFooter').innerHTML='';
   try{
     const res=await fetch(API+'/api/runs/'+id);
     const data=await res.json();
     renderDetail(data);
   }catch(e){
-    document.getElementById('modalBody').innerHTML='<p style="color:var(--red)">Yukleme hatasi</p>';
+    document.getElementById('modalBody').innerHTML=`<p style="color:var(--red)">${t('loadError')}</p>`;
   }
 }
 
 function closeModal(){document.getElementById('modalOverlay').style.display='none'}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
 
+function kindLabel(kind){
+  const map={script_md:t('scriptMd'),script_ssml:t('scriptSsml'),narration_wav:t('narrationWav'),thumbnail_png:t('thumbnailPng'),video_mp4:t('videoMp4'),metadata_json:t('metadataJson'),episode_pack_zip:t('episodePack')};
+  return map[kind]||kind;
+}
+
 function renderDetail(data){
   const run=data.run;
   const assets=data.assets||[];
-  const jobs=data.jobs||[];
 
   document.getElementById('modalTitle').textContent=run.Series+' - '+run.Episode;
 
@@ -330,47 +615,57 @@ function renderDetail(data){
 
   // Detail grid
   let detailHTML=`<div class="detail-grid">
-    <div class="detail-item"><div class="label">Series</div><div class="value">${esc(run.Series)}</div></div>
-    <div class="detail-item"><div class="label">Episode</div><div class="value">${esc(run.Episode)}</div></div>
-    <div class="detail-item"><div class="label">Style</div><div class="value">${esc(run.Style)}</div></div>
-    <div class="detail-item"><div class="label">Sure</div><div class="value">${run.DurationMin} dakika</div></div>
-    <div class="detail-item"><div class="label">Durum</div><div class="value"><span class="badge ${statusClass(run.Status)}">${run.Status}</span></div></div>
-    <div class="detail-item"><div class="label">Olusturulma</div><div class="value">${fmtDate(run.CreatedAt)}</div></div>
+    <div class="detail-item"><div class="label">${t('series')}</div><div class="value">${esc(run.Series)}</div></div>
+    <div class="detail-item"><div class="label">${t('episode')}</div><div class="value">${esc(run.Episode)}</div></div>
+    <div class="detail-item"><div class="label">${t('style')}</div><div class="value">${esc(run.Style)}</div></div>
+    <div class="detail-item"><div class="label">${t('language')}</div><div class="value">${langDisplay(run.Language)}</div></div>
+    <div class="detail-item"><div class="label">${t('duration')}</div><div class="value">${run.DurationMin} ${t('minuteLong')}</div></div>
+    <div class="detail-item"><div class="label">${t('status')}</div><div class="value"><span class="badge ${statusClass(run.Status)}">${run.Status}</span></div></div>
+    <div class="detail-item"><div class="label">${t('createdAt')}</div><div class="value">${fmtDate(run.CreatedAt)}</div></div>
   </div>`;
 
   // Error box
   let errorHTML='';
   if(run.Status==='FAILED'&&run.ErrorText){
-    errorHTML=`<div class="error-box"><strong>Hata:</strong>\n${esc(run.ErrorText)}</div>`;
+    errorHTML=`<div class="error-box"><strong>${t('error')}:</strong>\n${esc(run.ErrorText)}</div>`;
   }
 
   // Assets
   let assetsHTML='';
   if(assets.length){
-    const kindLabels={script_md:'Script (MD)',script_ssml:'Script (SSML)',narration_wav:'Ses Dosyasi',thumbnail_png:'Thumbnail',video_mp4:'Video',metadata_json:'Metadata',episode_pack_zip:'Episode Paketi'};
-    assetsHTML='<div class="section"><h3>Uretilen Dosyalar</h3><div class="asset-list">';
+    assetsHTML=`<div class="section"><h3>${t('generatedFiles')}</h3><div class="asset-list">`;
     assets.forEach(a=>{
       const fname=a.Path.split('/').pop();
       const url=API+'/assets/'+run.ID+'/'+fname;
-      assetsHTML+=`<div class="asset-item"><span>${kindLabels[a.Kind]||a.Kind} &mdash; ${fname}</span><a href="${url}" target="_blank">Goruntule / Indir</a></div>`;
+      assetsHTML+=`<div class="asset-item"><span>${kindLabel(a.Kind)} &mdash; ${fname}</span><a href="${url}" target="_blank">${t('viewDownload')}</a></div>`;
     });
     assetsHTML+='</div></div>';
   }
 
-  // Thumbnail preview
-  let thumbHTML='';
+  // Thumbnail preview + upload
   const thumbAsset=assets.find(a=>a.Kind==='thumbnail_png');
+  let thumbHTML=`<div class="section"><h3>${t('thumbnail')}</h3>`;
   if(thumbAsset){
     const fname=thumbAsset.Path.split('/').pop();
-    thumbHTML=`<div class="section"><h3>Thumbnail Onizleme</h3><img class="thumb-preview" src="${API}/assets/${run.ID}/${fname}" alt="thumbnail"></div>`;
+    thumbHTML+=`<img class="thumb-preview" id="thumbPreview" src="${API}/assets/${run.ID}/${fname}?t=${Date.now()}" alt="thumbnail">`;
+  } else {
+    thumbHTML+=`<div id="thumbPreview" style="color:var(--text2);font-size:13px;margin-bottom:4px">${t('noThumbnail')}</div>`;
   }
+  thumbHTML+=`<div class="thumb-upload">
+    <label class="thumb-upload-label" for="thumbFileInput">${t('selectImage')}</label>
+    <input type="file" id="thumbFileInput" accept="image/*" onchange="uploadThumbnail('${run.ID}',this.files[0])">
+    <span id="thumbFileName" style="font-size:12px;color:var(--text2)"></span>
+    <span id="thumbUploading" style="font-size:12px;color:var(--accent);display:none">${t('uploading')}</span>
+  </div>
+  <div class="thumb-drop-zone" id="thumbDropZone">${t('dropImageHere')}</div>
+  </div>`;
 
   // Video player
   let videoHTML='';
   const videoAsset=assets.find(a=>a.Kind==='video_mp4');
   if(videoAsset){
     const fname=videoAsset.Path.split('/').pop();
-    videoHTML=`<div class="section"><h3>Video</h3><video class="video-player" controls><source src="${API}/assets/${run.ID}/${fname}" type="video/mp4">Tarayiciniz video desteklemiyor.</video></div>`;
+    videoHTML=`<div class="section"><h3>${t('video')}</h3><video class="video-player" controls><source src="${API}/assets/${run.ID}/${fname}" type="video/mp4">${t('videoNotSupported')}</video></div>`;
   }
 
   // Script section
@@ -378,11 +673,11 @@ function renderDetail(data){
   let scriptHTML='';
   if(scriptAsset){
     scriptHTML=`<div class="section"><h3>Script</h3>
-      <div id="scriptLoading" style="color:var(--text2)">Script yukleniyor...</div>
+      <div id="scriptLoading" style="color:var(--text2)">${t('scriptLoading')}</div>
       <textarea class="script-area" id="scriptEditor" style="display:none"></textarea>
       <div class="script-actions" id="scriptActions" style="display:none">
-        <button class="btn btn-primary btn-sm" onclick="saveScript('${run.ID}')">Kaydet</button>
-        <button class="btn btn-sm" style="background:var(--surface2);color:var(--text)" onclick="loadScript('${run.ID}')">Sifirla</button>
+        <button class="btn btn-primary btn-sm" onclick="saveScript('${run.ID}')">${t('save')}</button>
+        <button class="btn btn-sm" style="background:var(--surface2);color:var(--text)" onclick="loadScript('${run.ID}')">${t('reset')}</button>
       </div>
     </div>`;
   }
@@ -392,19 +687,33 @@ function renderDetail(data){
   // Footer buttons
   let footerHTML='';
   if(run.Status==='FAILED'){
-    footerHTML+=`<button class="btn btn-primary btn-sm" onclick="retryRun('${run.ID}')">Tekrar Dene</button>`;
+    footerHTML+=`<button class="btn btn-primary btn-sm" onclick="retryRun('${run.ID}')">${t('retry')}</button>`;
   }
-  footerHTML+=`<button class="btn btn-danger btn-sm" onclick="deleteRun('${run.ID}')">Sil</button>`;
+  footerHTML+=`<button class="btn btn-danger btn-sm" onclick="deleteRun('${run.ID}')">${t('delete')}</button>`;
   document.getElementById('modalFooter').innerHTML=footerHTML;
+
+  // Setup thumbnail drop zone
+  const dropZone=document.getElementById('thumbDropZone');
+  if(dropZone){
+    dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('dragover')});
+    dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop',e=>{
+      e.preventDefault();dropZone.classList.remove('dragover');
+      const file=e.dataTransfer.files[0];
+      if(file&&file.type.startsWith('image/'))uploadThumbnail(run.ID,file);
+      else toast(t('onlyImages'),'error');
+    });
+  }
 
   // Load script content
   if(scriptAsset)loadScript(run.ID);
 }
 
+// ==================== Script ====================
 async function loadScript(runID){
   try{
     const res=await fetch(API+'/api/runs/'+runID+'/script');
-    if(!res.ok)throw new Error('Script bulunamadi');
+    if(!res.ok)throw new Error(t('scriptLoadError'));
     const text=await res.text();
     const editor=document.getElementById('scriptEditor');
     const loading=document.getElementById('scriptLoading');
@@ -414,7 +723,7 @@ async function loadScript(runID){
     loading.style.display='none';
     actions.style.display='flex';
   }catch(e){
-    document.getElementById('scriptLoading').textContent='Script yuklenemedi: '+e.message;
+    document.getElementById('scriptLoading').textContent=t('scriptLoadError')+': '+e.message;
   }
 }
 
@@ -427,30 +736,52 @@ async function saveScript(runID){
       body:JSON.stringify({content})
     });
     if(!res.ok)throw new Error((await res.json()).error);
-    toast('Script kaydedildi!');
-  }catch(e){toast('Kaydetme hatasi: '+e.message,'error')}
+    toast(t('scriptSaved'));
+  }catch(e){toast(t('scriptSaveError')+': '+e.message,'error')}
 }
 
+// ==================== Thumbnail upload ====================
+async function uploadThumbnail(runID,file){
+  if(!file)return;
+  if(!file.type.startsWith('image/')){toast(t('onlyImages'),'error');return}
+  const nameEl=document.getElementById('thumbFileName');
+  const uploadingEl=document.getElementById('thumbUploading');
+  if(nameEl)nameEl.textContent=file.name;
+  if(uploadingEl)uploadingEl.style.display='inline';
+  try{
+    const fd=new FormData();
+    fd.append('file',file);
+    const res=await fetch(API+'/api/runs/'+runID+'/thumbnail',{method:'PUT',body:fd});
+    if(!res.ok)throw new Error((await res.json()).error);
+    toast(t('thumbnailUpdated'));
+    openDetail(runID);
+  }catch(e){toast(t('uploadError')+': '+e.message,'error')}
+  finally{if(uploadingEl)uploadingEl.style.display='none'}
+}
+
+// ==================== Retry / Delete ====================
 async function retryRun(id){
   try{
     const res=await fetch(API+'/api/runs/'+id+'/retry',{method:'POST'});
     if(!res.ok)throw new Error((await res.json()).error);
-    toast('Calistirma yeniden kuyruga alindi');
+    toast(t('runRequeued'));
     closeModal();fetchRuns();
-  }catch(e){toast('Hata: '+e.message,'error')}
+  }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
 }
 
 async function deleteRun(id){
-  if(!confirm('Bu calistirmayi silmek istediginizden emin misiniz?'))return;
+  if(!confirm(t('confirmDelete')))return;
   try{
     const res=await fetch(API+'/api/runs/'+id,{method:'DELETE'});
-    if(!res.ok)throw new Error('Silme hatasi');
-    toast('Calistirma silindi');
+    if(!res.ok)throw new Error(t('deleteError'));
+    toast(t('runDeleted'));
     closeModal();fetchRuns();
-  }catch(e){toast('Hata: '+e.message,'error')}
+  }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
 }
 
-// -- Init --
+// ==================== Init ====================
+document.getElementById('langSelect').value=currentLang;
+setLang(currentLang);
 fetchRuns();
 refreshTimer=setInterval(fetchRuns,10000);
 </script>

@@ -8,6 +8,7 @@ type Run struct {
 	Series      string
 	Episode     string
 	Style       string
+	Language    string
 	DurationMin int
 	Status      RunStatus
 	ErrorText   string

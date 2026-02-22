@@ -25,6 +25,7 @@ type ScriptRequest struct {
 	Series      string
 	Episode     string
 	Style       string // Cosmos | Earthside | Myth
+	Language    string // en, tr, pt, es, it
 	DurationMin int
 }
 
@@ -195,12 +196,23 @@ func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg) (string, er
 
 const systemPrompt = `You are a professional sleep narration scriptwriter. You write extremely calm, slow-paced narration for sleep videos. Your prose is gentle, hypnotic, and monotone-friendly. You never include action, tension, conflict, or anything stimulating. Every sentence should feel like a soft exhale.`
 
+var langNames = map[string]string{
+	"en": "English",
+	"tr": "Turkish",
+	"pt": "Portuguese",
+	"es": "Spanish",
+	"it": "Italian",
+}
+
 var userTmpl = template.Must(template.New("user").Parse(`Write a sleep narration script.
 
 Series: {{.Series}}
 Episode: {{.Episode}}
 Style: {{.Style}}
+Language: {{.LangName}}
 Target: approximately {{.WordCount}} words ({{.DurationMin}} minutes at ~130 words per minute)
+
+IMPORTANT: Write the ENTIRE script in {{.LangName}}. Every sentence, paragraph, and word must be in {{.LangName}}.
 
 Style guide for "{{.Style}}":
 {{.StyleGuide}}
@@ -236,10 +248,18 @@ func buildPrompt(req ScriptRequest, wordCount int) (string, error) {
 	if !ok {
 		guide = styleGuides["Cosmos"]
 	}
+	lang := req.Language
+	if lang == "" {
+		lang = "en"
+	}
+	langName, ok := langNames[lang]
+	if !ok {
+		langName = "English"
+	}
 	data := struct {
-		Series, Episode, Style, StyleGuide string
-		DurationMin, WordCount             int
-	}{req.Series, req.Episode, req.Style, guide, req.DurationMin, wordCount}
+		Series, Episode, Style, StyleGuide, LangName string
+		DurationMin, WordCount                       int
+	}{req.Series, req.Episode, req.Style, guide, langName, req.DurationMin, wordCount}
 
 	var buf bytes.Buffer
 	if err := userTmpl.Execute(&buf, data); err != nil {

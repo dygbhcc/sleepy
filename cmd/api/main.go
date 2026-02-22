@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -48,6 +49,7 @@ func main() {
 	mux.HandleFunc("GET /api/runs/{id}/assets", handleListAssets)
 	mux.HandleFunc("GET /api/runs/{id}/script", handleGetScript)
 	mux.HandleFunc("PUT /api/runs/{id}/script", handleUpdateScript)
+	mux.HandleFunc("PUT /api/runs/{id}/thumbnail", handleUpdateThumbnail)
 	mux.HandleFunc("GET /assets/{runID}/{file}", handleServeAsset)
 
 	addr := os.Getenv("ADDR")
@@ -102,6 +104,7 @@ func handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		Series      string `json:"series"`
 		Episode     string `json:"episode"`
 		Style       string `json:"style"`
+		Language    string `json:"language"`
 		DurationMin int    `json:"duration_min"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -115,11 +118,14 @@ func handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	if req.Style == "" {
 		req.Style = "Cosmos"
 	}
+	if req.Language == "" {
+		req.Language = "en"
+	}
 	if req.DurationMin <= 0 {
 		req.DurationMin = 30
 	}
 
-	run, err := store.CreateRun(r.Context(), req.Series, req.Episode, req.Style, req.DurationMin)
+	run, err := store.CreateRun(r.Context(), req.Series, req.Episode, req.Style, req.Language, req.DurationMin)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -302,4 +308,78 @@ func handleUpdateScript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, asset)
+}
+
+func handleUpdateThumbnail(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	// Verify the run exists
+	_, err := store.GetRun(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	// Parse multipart form (max 10MB)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "file field is required")
+		return
+	}
+	defer file.Close()
+
+	// Validate file type
+	ct := header.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "image/") {
+		writeErr(w, http.StatusBadRequest, "only image files are allowed")
+		return
+	}
+
+	// Determine extension from content type
+	ext := ".png"
+	switch ct {
+	case "image/jpeg":
+		ext = ".jpg"
+	case "image/webp":
+		ext = ".webp"
+	}
+
+	// Ensure run asset directory exists
+	runDir := filepath.Join(assetRoot, id)
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot create asset directory")
+		return
+	}
+
+	// Write file to disk
+	destName := "thumbnail" + ext
+	destPath := filepath.Join(runDir, destName)
+	out, err := os.Create(destPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot create file")
+		return
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, file); err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot write file")
+		return
+	}
+
+	// Update or insert asset record
+	existing, err := store.GetAsset(r.Context(), id, domain.AssetThumbnailPNG)
+	if err == nil {
+		// Update existing asset path
+		store.UpdateAssetPath(r.Context(), existing.ID, destPath)
+	} else {
+		// Insert new asset
+		store.InsertAsset(r.Context(), id, domain.AssetThumbnailPNG, destPath)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"path": destPath})
 }

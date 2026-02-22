@@ -17,6 +17,7 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run) error {
 		Series:      run.Series,
 		Episode:     run.Episode,
 		Style:       run.Style,
+		Language:    run.Language,
 		DurationMin: run.DurationMin,
 	})
 	if err != nil {

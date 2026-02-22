@@ -35,11 +35,39 @@ func NewEdgeClient(cfg EdgeConfig) *EdgeClient {
 	return &EdgeClient{cfg: cfg}
 }
 
+// defaultVoices maps language codes to recommended Edge TTS voices for sleep narration.
+var defaultVoices = map[string]string{
+	"en": "en-US-AndrewNeural",
+	"tr": "tr-TR-AhmetNeural",
+	"pt": "pt-BR-AntonioNeural",
+	"es": "es-ES-AlvaroNeural",
+	"it": "it-IT-DiegoNeural",
+}
+
+// VoiceForLang returns the configured voice for the given language,
+// falling back to the default configured voice.
+func (c *EdgeClient) VoiceForLang(lang string) string {
+	if v, ok := defaultVoices[lang]; ok {
+		return v
+	}
+	return c.cfg.Voice
+}
+
 // Synthesize generates speech from text using edge-tts, then converts to WAV.
 func (c *EdgeClient) Synthesize(ctx context.Context, text string, outPath string) error {
+	return c.synthesizeWithVoice(ctx, text, outPath, c.cfg.Voice)
+}
+
+// SynthesizeWithLang generates speech using a voice appropriate for the given language.
+func (c *EdgeClient) SynthesizeWithLang(ctx context.Context, text string, outPath string, lang string) error {
+	voice := c.VoiceForLang(lang)
+	return c.synthesizeWithVoice(ctx, text, outPath, voice)
+}
+
+func (c *EdgeClient) synthesizeWithVoice(ctx context.Context, text string, outPath string, voice string) error {
 	mp3Path := outPath + ".tmp.mp3"
 
-	log.Printf("edge-tts: synthesizing with voice=%s rate=%s", c.cfg.Voice, c.cfg.Rate)
+	log.Printf("edge-tts: synthesizing with voice=%s rate=%s", voice, c.cfg.Rate)
 
 	// Write text to temp file to avoid shell escaping issues.
 	txtPath := outPath + ".tmp.txt"
@@ -51,7 +79,7 @@ func (c *EdgeClient) Synthesize(ctx context.Context, text string, outPath string
 	// Call edge-tts. Use --rate=VALUE format to prevent argparse from
 	// interpreting negative values like "-20%" as flags.
 	cmd := exec.CommandContext(ctx, "python3", "-m", "edge_tts",
-		"--voice="+c.cfg.Voice,
+		"--voice="+voice,
 		"--rate="+c.cfg.Rate,
 		"--file="+txtPath,
 		"--write-media="+mp3Path,

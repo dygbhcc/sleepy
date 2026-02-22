@@ -19,6 +19,12 @@ type TTSSynthesizer interface {
 	Synthesize(ctx context.Context, text string, outPath string) error
 }
 
+// LanguageAwareTTS extends TTSSynthesizer with per-call language support.
+type LanguageAwareTTS interface {
+	TTSSynthesizer
+	SynthesizeWithLang(ctx context.Context, text string, outPath string, lang string) error
+}
+
 // Deps bundles every dependency the worker needs.
 type Deps struct {
 	DB     *db.DB

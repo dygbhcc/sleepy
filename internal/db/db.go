@@ -43,9 +43,9 @@ func (d *DB) Close() error { return d.pool.Close() }
 func (d *DB) GetRun(ctx context.Context, id string) (*domain.Run, error) {
 	r := &domain.Run{}
 	err := d.pool.QueryRowContext(ctx,
-		`SELECT id, series, episode, style, duration_min, status, error_text, created_at, updated_at
+		`SELECT id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at
 		 FROM runs WHERE id = $1`, id,
-	).Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.DurationMin,
+	).Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
 		&r.Status, &r.ErrorText, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get run %s: %w", id, err)
@@ -105,6 +105,17 @@ func (d *DB) GetAsset(ctx context.Context, runID, kind string) (*domain.Asset, e
 	return a, nil
 }
 
+// UpdateAssetPath updates the file path of an existing asset.
+func (d *DB) UpdateAssetPath(ctx context.Context, id, path string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE assets SET path = $1 WHERE id = $2`, path, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update asset path: %w", err)
+	}
+	return nil
+}
+
 // ---------- job_queue ----------
 
 // DequeueJob atomically claims the oldest PENDING job.
@@ -159,11 +170,11 @@ func (d *DB) ListRuns(ctx context.Context, status string) ([]domain.Run, error) 
 	var err error
 	if status != "" {
 		rows, err = d.pool.QueryContext(ctx,
-			`SELECT id, series, episode, style, duration_min, status, error_text, created_at, updated_at
+			`SELECT id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at
 			 FROM runs WHERE status = $1 ORDER BY created_at DESC`, status)
 	} else {
 		rows, err = d.pool.QueryContext(ctx,
-			`SELECT id, series, episode, style, duration_min, status, error_text, created_at, updated_at
+			`SELECT id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at
 			 FROM runs ORDER BY created_at DESC`)
 	}
 	if err != nil {
@@ -174,7 +185,7 @@ func (d *DB) ListRuns(ctx context.Context, status string) ([]domain.Run, error) 
 	var runs []domain.Run
 	for rows.Next() {
 		var r domain.Run
-		if err := rows.Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.DurationMin,
+		if err := rows.Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
 			&r.Status, &r.ErrorText, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan run: %w", err)
 		}
@@ -184,14 +195,14 @@ func (d *DB) ListRuns(ctx context.Context, status string) ([]domain.Run, error) 
 }
 
 // CreateRun inserts a new run and returns it.
-func (d *DB) CreateRun(ctx context.Context, series, episode, style string, durationMin int) (*domain.Run, error) {
+func (d *DB) CreateRun(ctx context.Context, series, episode, style, language string, durationMin int) (*domain.Run, error) {
 	r := &domain.Run{}
 	err := d.pool.QueryRowContext(ctx,
-		`INSERT INTO runs (series, episode, style, duration_min)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, series, episode, style, duration_min, status, error_text, created_at, updated_at`,
-		series, episode, style, durationMin,
-	).Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.DurationMin,
+		`INSERT INTO runs (series, episode, style, language, duration_min)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at`,
+		series, episode, style, language, durationMin,
+	).Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
 		&r.Status, &r.ErrorText, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
