@@ -274,11 +274,38 @@ tr:hover{background:var(--surface2);cursor:pointer}
           </div>
           <div class="form-group">
             <label data-i18n="edgeVoice"></label>
-            <input type="text" id="sEdgeVoice" placeholder="en-US-AndrewNeural">
+            <select id="sEdgeVoice">
+              <optgroup label="English">
+                <option value="en-US-AndrewNeural">en-US-AndrewNeural</option>
+                <option value="en-US-GuyNeural">en-US-GuyNeural</option>
+                <option value="en-US-BrianNeural">en-US-BrianNeural</option>
+              </optgroup>
+              <optgroup label="Turkce">
+                <option value="tr-TR-AhmetNeural">tr-TR-AhmetNeural</option>
+                <option value="tr-TR-EmelNeural">tr-TR-EmelNeural</option>
+              </optgroup>
+              <optgroup label="Portugues">
+                <option value="pt-BR-AntonioNeural">pt-BR-AntonioNeural</option>
+                <option value="pt-BR-FranciscaNeural">pt-BR-FranciscaNeural</option>
+              </optgroup>
+              <optgroup label="Espanol">
+                <option value="es-ES-AlvaroNeural">es-ES-AlvaroNeural</option>
+                <option value="es-MX-JorgeNeural">es-MX-JorgeNeural</option>
+              </optgroup>
+              <optgroup label="Italiano">
+                <option value="it-IT-DiegoNeural">it-IT-DiegoNeural</option>
+                <option value="it-IT-IsabellaNeural">it-IT-IsabellaNeural</option>
+              </optgroup>
+            </select>
           </div>
           <div class="form-group">
             <label data-i18n="edgeRate"></label>
-            <input type="text" id="sEdgeRate" placeholder="-20%">
+            <select id="sEdgeRate">
+              <option value="-30%" data-i18n-label="edgeRateVerySlow">-30%</option>
+              <option value="-20%" selected data-i18n-label="edgeRateSlow">-20%</option>
+              <option value="-10%" data-i18n-label="edgeRateSlightlySlow">-10%</option>
+              <option value="+0%" data-i18n-label="edgeRateNormal">+0%</option>
+            </select>
           </div>
         </div>
       </div>
@@ -312,8 +339,8 @@ tr:hover{background:var(--surface2);cursor:pointer}
             <input type="text" id="sElevenModelID" placeholder="eleven_monolingual_v1">
           </div>
           <div class="form-group">
-            <label data-i18n="elevenSpeed"></label>
-            <input type="number" id="sElevenSpeed" step="0.05" min="0.25" max="4.0" value="0.80">
+            <label><span data-i18n="elevenSpeed"></span>: <span id="sElevenSpeedVal">0.80</span></label>
+            <input type="range" id="sElevenSpeed" step="0.05" min="0.25" max="2.0" value="0.80" oninput="document.getElementById('sElevenSpeedVal').textContent=parseFloat(this.value).toFixed(2)" style="width:100%;accent-color:var(--accent)">
           </div>
         </div>
       </div>
@@ -391,6 +418,10 @@ const LANGS = {
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Edge Voice',
     edgeRate: 'Edge Rate',
+    edgeRateVerySlow: 'Very slow',
+    edgeRateSlow: 'Slow',
+    edgeRateSlightlySlow: 'Slightly slow',
+    edgeRateNormal: 'Normal',
     openaiBaseUrl: 'Base URL',
     openaiModel: 'Model',
     elevenVoiceId: 'Voice ID',
@@ -454,6 +485,10 @@ const LANGS = {
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Edge Ses',
     edgeRate: 'Edge Hiz',
+    edgeRateVerySlow: 'Cok yavas',
+    edgeRateSlow: 'Yavas',
+    edgeRateSlightlySlow: 'Biraz yavas',
+    edgeRateNormal: 'Normal',
     openaiBaseUrl: 'Base URL',
     openaiModel: 'Model',
     elevenVoiceId: 'Ses ID',
@@ -517,6 +552,10 @@ const LANGS = {
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Voz Edge',
     edgeRate: 'Taxa Edge',
+    edgeRateVerySlow: 'Muito lento',
+    edgeRateSlow: 'Lento',
+    edgeRateSlightlySlow: 'Um pouco lento',
+    edgeRateNormal: 'Normal',
     openaiBaseUrl: 'URL Base',
     openaiModel: 'Modelo',
     elevenVoiceId: 'ID da Voz',
@@ -580,6 +619,10 @@ const LANGS = {
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Voz Edge',
     edgeRate: 'Velocidad Edge',
+    edgeRateVerySlow: 'Muy lento',
+    edgeRateSlow: 'Lento',
+    edgeRateSlightlySlow: 'Un poco lento',
+    edgeRateNormal: 'Normal',
     openaiBaseUrl: 'URL Base',
     openaiModel: 'Modelo',
     elevenVoiceId: 'ID de Voz',
@@ -643,6 +686,10 @@ const LANGS = {
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Voce Edge',
     edgeRate: 'Velocita Edge',
+    edgeRateVerySlow: 'Molto lento',
+    edgeRateSlow: 'Lento',
+    edgeRateSlightlySlow: 'Un po lento',
+    edgeRateNormal: 'Normale',
     openaiBaseUrl: 'URL Base',
     openaiModel: 'Modello',
     elevenVoiceId: 'ID Voce',
@@ -682,6 +729,9 @@ function applyI18n(){
   document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{
     el.placeholder = t(el.dataset.i18nPlaceholder);
   });
+  document.querySelectorAll('[data-i18n-label]').forEach(el=>{
+    el.textContent = el.value + ' (' + t(el.dataset.i18nLabel) + ')';
+  });
 }
 
 // ==================== App State ====================
@@ -689,6 +739,8 @@ const API = '';
 let allRuns = [];
 let currentFilter = 'ALL';
 let refreshTimer = null;
+let detailPollTimer = null;
+let detailRunID = null;
 
 const STATUSES = ['ALL','PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','DONE','FAILED'];
 const PIPELINE = ['PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','DONE'];
@@ -807,16 +859,38 @@ async function openDetail(id){
   document.getElementById('modalOverlay').style.display='flex';
   document.getElementById('modalBody').innerHTML=`<p style="color:var(--text2)">${t('loading')}</p>`;
   document.getElementById('modalFooter').innerHTML='';
+  detailRunID=id;
+  if(detailPollTimer){clearInterval(detailPollTimer);detailPollTimer=null}
   try{
     const res=await fetch(API+'/api/runs/'+id);
     const data=await res.json();
     renderDetail(data);
+    if(data.run.Status!=='DONE'&&data.run.Status!=='FAILED'){
+      detailPollTimer=setInterval(()=>pollDetail(id),3000);
+    }
   }catch(e){
     document.getElementById('modalBody').innerHTML=`<p style="color:var(--red)">${t('loadError')}</p>`;
   }
 }
 
-function closeModal(){document.getElementById('modalOverlay').style.display='none'}
+async function pollDetail(id){
+  if(detailRunID!==id){clearInterval(detailPollTimer);detailPollTimer=null;return}
+  try{
+    const res=await fetch(API+'/api/runs/'+id);
+    const data=await res.json();
+    renderDetail(data);
+    if(data.run.Status==='DONE'||data.run.Status==='FAILED'){
+      clearInterval(detailPollTimer);detailPollTimer=null;
+      fetchRuns();
+    }
+  }catch(e){console.error('poll detail:',e)}
+}
+
+function closeModal(){
+  document.getElementById('modalOverlay').style.display='none';
+  detailRunID=null;
+  if(detailPollTimer){clearInterval(detailPollTimer);detailPollTimer=null}
+}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeSettings()}});
 
 function kindLabel(kind){
@@ -1037,9 +1111,11 @@ async function loadSettings(){
     document.getElementById('sElevenKey').value=s.elevenlabs_api_key||'';
     document.getElementById('sElevenVoiceID').value=s.elevenlabs_voice_id||'';
     document.getElementById('sElevenModelID').value=s.elevenlabs_model_id||'';
-    document.getElementById('sElevenSpeed').value=s.elevenlabs_speed||0.80;
-    document.getElementById('sEdgeVoice').value=s.edge_voice||'';
-    document.getElementById('sEdgeRate').value=s.edge_rate||'';
+    const speedVal=s.elevenlabs_speed||0.80;
+    document.getElementById('sElevenSpeed').value=speedVal;
+    document.getElementById('sElevenSpeedVal').textContent=parseFloat(speedVal).toFixed(2);
+    if(s.edge_voice)document.getElementById('sEdgeVoice').value=s.edge_voice;
+    if(s.edge_rate)document.getElementById('sEdgeRate').value=s.edge_rate;
     document.getElementById('sNormalize').checked=s.normalize!==false;
   }catch(e){console.error('load settings:',e)}
 }
