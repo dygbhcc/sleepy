@@ -11,6 +11,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"sleepy/internal/errs"
 )
 
 // Config holds OpenAI-compatible API settings.
@@ -85,9 +87,9 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 
 		raw, err := c.chatCompletion(ctx, messages)
 		if err != nil {
-			// On rate limit, wait and retry instead of failing immediately.
-			if strings.Contains(err.Error(), "429") && attempt < maxRetries {
-				log.Printf("llm: rate limited on attempt %d, will retry", attempt+1)
+			// On rate limit (typed TransientError), wait and retry.
+			if errs.IsTransient(err) && attempt < maxRetries {
+				log.Printf("llm: transient error on attempt %d, will retry", attempt+1)
 				continue
 			}
 			return nil, fmt.Errorf("llm call (attempt %d): %w", attempt+1, err)
@@ -176,7 +178,11 @@ func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg) (string, er
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("api error (HTTP %d): %s", resp.StatusCode, truncate(string(respBody), 500))
+		baseErr := fmt.Errorf("api error (HTTP %d): %s", resp.StatusCode, truncate(string(respBody), 500))
+		if resp.StatusCode == 429 || resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504 {
+			return "", errs.NewTransient("openai", resp.StatusCode, baseErr)
+		}
+		return "", baseErr
 	}
 
 	var cr chatResp

@@ -39,14 +39,23 @@ func (d *DB) Close() error { return d.pool.Close() }
 
 // ---------- runs ----------
 
+const runColumns = `id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at,
+	script_attempt, voice_attempt, render_attempt, package_attempt, last_error, needs_review,
+	script_hash, voice_hash, render_hash, locked_by, locked_at`
+
+func scanRun(row interface{ Scan(...any) error }, r *domain.Run) error {
+	return row.Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
+		&r.Status, &r.ErrorText, &r.CreatedAt, &r.UpdatedAt,
+		&r.ScriptAttempt, &r.VoiceAttempt, &r.RenderAttempt, &r.PackageAttempt,
+		&r.LastError, &r.NeedsReview, &r.ScriptHash, &r.VoiceHash, &r.RenderHash,
+		&r.LockedBy, &r.LockedAt)
+}
+
 // GetRun loads a run by ID.
 func (d *DB) GetRun(ctx context.Context, id string) (*domain.Run, error) {
 	r := &domain.Run{}
-	err := d.pool.QueryRowContext(ctx,
-		`SELECT id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at
-		 FROM runs WHERE id = $1`, id,
-	).Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
-		&r.Status, &r.ErrorText, &r.CreatedAt, &r.UpdatedAt)
+	err := scanRun(d.pool.QueryRowContext(ctx,
+		`SELECT `+runColumns+` FROM runs WHERE id = $1`, id), r)
 	if err != nil {
 		return nil, fmt.Errorf("get run %s: %w", id, err)
 	}
@@ -68,11 +77,149 @@ func (d *DB) UpdateRunStatus(ctx context.Context, id string, status domain.RunSt
 // FailRun marks a run as FAILED with an error message.
 func (d *DB) FailRun(ctx context.Context, id string, errText string) error {
 	_, err := d.pool.ExecContext(ctx,
-		`UPDATE runs SET status = $1, error_text = $2, updated_at = now() WHERE id = $3`,
+		`UPDATE runs SET status = $1, error_text = $2, last_error = $2, updated_at = now() WHERE id = $3`,
 		string(domain.StatusFailed), errText, id,
 	)
 	if err != nil {
 		return fmt.Errorf("fail run: %w", err)
+	}
+	return nil
+}
+
+// IncrementAttempt atomically increments a specific attempt counter.
+// column must be one of: script_attempt, voice_attempt, render_attempt, package_attempt.
+func (d *DB) IncrementAttempt(ctx context.Context, id string, column string) error {
+	// Whitelist column names to prevent SQL injection.
+	allowed := map[string]bool{
+		"script_attempt": true, "voice_attempt": true,
+		"render_attempt": true, "package_attempt": true,
+	}
+	if !allowed[column] {
+		return fmt.Errorf("invalid attempt column: %s", column)
+	}
+	_, err := d.pool.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE runs SET %s = %s + 1, updated_at = now() WHERE id = $1`, column, column),
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("increment %s: %w", column, err)
+	}
+	return nil
+}
+
+// SetNeedsReview marks a run as needing human review.
+func (d *DB) SetNeedsReview(ctx context.Context, id string, reason string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET status = $1, needs_review = TRUE, last_error = $2, updated_at = now() WHERE id = $3`,
+		string(domain.StatusNeedsReview), reason, id,
+	)
+	if err != nil {
+		return fmt.Errorf("set needs review: %w", err)
+	}
+	return nil
+}
+
+// UpdateRunHash stores the input hash for a given step.
+// column must be one of: script_hash, voice_hash, render_hash.
+func (d *DB) UpdateRunHash(ctx context.Context, id string, column string, hash string) error {
+	allowed := map[string]bool{
+		"script_hash": true, "voice_hash": true, "render_hash": true,
+	}
+	if !allowed[column] {
+		return fmt.Errorf("invalid hash column: %s", column)
+	}
+	_, err := d.pool.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE runs SET %s = $1, updated_at = now() WHERE id = $2`, column),
+		hash, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update %s: %w", column, err)
+	}
+	return nil
+}
+
+// ResetRunToStatus resets a run back to a given status, clearing error state.
+func (d *DB) ResetRunToStatus(ctx context.Context, id string, status domain.RunStatus) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET status = $1, error_text = '', last_error = '', needs_review = FALSE, updated_at = now() WHERE id = $2`,
+		string(status), id,
+	)
+	if err != nil {
+		return fmt.Errorf("reset run to %s: %w", status, err)
+	}
+	return nil
+}
+
+// UpdateRunLastError sets the last_error field without changing status.
+func (d *DB) UpdateRunLastError(ctx context.Context, id string, errText string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET last_error = $1, updated_at = now() WHERE id = $2`,
+		errText, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update last_error: %w", err)
+	}
+	return nil
+}
+
+// ResetAttempts resets all attempt counters to zero (used when retrying from UI).
+func (d *DB) ResetAttempts(ctx context.Context, id string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET script_attempt=0, voice_attempt=0, render_attempt=0, package_attempt=0,
+		 needs_review=FALSE, last_error='', updated_at=now() WHERE id = $1`, id,
+	)
+	if err != nil {
+		return fmt.Errorf("reset attempts: %w", err)
+	}
+	return nil
+}
+
+// ClaimNextRun atomically claims the next eligible run for processing.
+// A run is eligible if it is not in a terminal state and is either unlocked
+// or has an expired lock (older than 5 minutes). Returns nil, nil if no run is available.
+func (d *DB) ClaimNextRun(ctx context.Context, workerID string) (*domain.Run, error) {
+	r := &domain.Run{}
+	err := scanRun(d.pool.QueryRowContext(ctx,
+		`UPDATE runs
+		 SET locked_by = $1, locked_at = now(), updated_at = now()
+		 WHERE id = (
+		     SELECT id FROM runs
+		     WHERE status NOT IN ('DONE','FAILED','NEEDS_REVIEW')
+		       AND (locked_by IS NULL OR locked_at < now() - interval '5 minutes')
+		     ORDER BY created_at ASC
+		     LIMIT 1
+		     FOR UPDATE SKIP LOCKED
+		 )
+		 RETURNING `+runColumns, workerID), r)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("claim next run: %w", err)
+	}
+	return r, nil
+}
+
+// ReleaseRun releases the lock on a run after processing one stage.
+func (d *DB) ReleaseRun(ctx context.Context, id string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET locked_by = NULL, locked_at = NULL, updated_at = now() WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("release run: %w", err)
+	}
+	return nil
+}
+
+// RenewLock extends the lock TTL for a run being processed.
+func (d *DB) RenewLock(ctx context.Context, id string, workerID string) error {
+	res, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET locked_at = now(), updated_at = now() WHERE id = $1 AND locked_by = $2`, id, workerID)
+	if err != nil {
+		return fmt.Errorf("renew lock: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("lock lost for run %s (worker %s)", id, workerID)
 	}
 	return nil
 }
@@ -170,12 +317,10 @@ func (d *DB) ListRuns(ctx context.Context, status string) ([]domain.Run, error) 
 	var err error
 	if status != "" {
 		rows, err = d.pool.QueryContext(ctx,
-			`SELECT id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at
-			 FROM runs WHERE status = $1 ORDER BY created_at DESC`, status)
+			`SELECT `+runColumns+` FROM runs WHERE status = $1 ORDER BY created_at DESC`, status)
 	} else {
 		rows, err = d.pool.QueryContext(ctx,
-			`SELECT id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at
-			 FROM runs ORDER BY created_at DESC`)
+			`SELECT `+runColumns+` FROM runs ORDER BY created_at DESC`)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
@@ -185,8 +330,7 @@ func (d *DB) ListRuns(ctx context.Context, status string) ([]domain.Run, error) 
 	var runs []domain.Run
 	for rows.Next() {
 		var r domain.Run
-		if err := rows.Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
-			&r.Status, &r.ErrorText, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := scanRun(rows, &r); err != nil {
 			return nil, fmt.Errorf("scan run: %w", err)
 		}
 		runs = append(runs, r)
@@ -197,13 +341,11 @@ func (d *DB) ListRuns(ctx context.Context, status string) ([]domain.Run, error) 
 // CreateRun inserts a new run and returns it.
 func (d *DB) CreateRun(ctx context.Context, series, episode, style, language string, durationMin int) (*domain.Run, error) {
 	r := &domain.Run{}
-	err := d.pool.QueryRowContext(ctx,
+	err := scanRun(d.pool.QueryRowContext(ctx,
 		`INSERT INTO runs (series, episode, style, language, duration_min)
 		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at`,
-		series, episode, style, language, durationMin,
-	).Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
-		&r.Status, &r.ErrorText, &r.CreatedAt, &r.UpdatedAt)
+		 RETURNING `+runColumns,
+		series, episode, style, language, durationMin), r)
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}

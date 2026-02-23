@@ -12,6 +12,7 @@ const (
 	StatusPackaged    RunStatus = "PACKAGED"
 	StatusDone        RunStatus = "DONE"
 	StatusFailed      RunStatus = "FAILED"
+	StatusNeedsReview RunStatus = "NEEDS_REVIEW"
 )
 
 // JobStatus represents the state of a queued job.

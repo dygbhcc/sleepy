@@ -137,7 +137,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 	m.running = true
 
 	go func() {
-		jobs.RunWorker(ctx, deps, 3*time.Second, false)
+		jobs.RunWorker(ctx, deps, 3*time.Second, false, "")
 		m.mu.Lock()
 		m.running = false
 		m.cancel = nil

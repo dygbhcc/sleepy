@@ -40,6 +40,12 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run) error {
 		return err
 	}
 
+	// Compute and store script hash for idempotency.
+	hash, err := computeFileHash(mdPath)
+	if err == nil {
+		_ = deps.DB.UpdateRunHash(ctx, run.ID, "script_hash", hash)
+	}
+
 	log.Printf("step_script: done (%d words)", len(strings.Fields(result.Markdown)))
 	return nil
 }

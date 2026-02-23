@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+
+	"sleepy/internal/errs"
 	"os/exec"
 	"time"
 )
@@ -116,7 +118,11 @@ func (c *Client) callAPI(ctx context.Context, text, outPath string) error {
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("elevenlabs HTTP %d: %s", resp.StatusCode, truncateBytes(b, 500))
+		baseErr := fmt.Errorf("elevenlabs HTTP %d: %s", resp.StatusCode, truncateBytes(b, 500))
+		if resp.StatusCode == 429 || resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504 {
+			return errs.NewTransient("elevenlabs", resp.StatusCode, baseErr)
+		}
+		return baseErr
 	}
 
 	f, err := os.Create(outPath)

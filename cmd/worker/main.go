@@ -111,7 +111,7 @@ func main() {
 	}()
 
 	oneShot := envOr("WORKER_ONE_SHOT", "") != ""
-	jobs.RunWorker(ctx, deps, 3*time.Second, oneShot)
+	jobs.RunWorker(ctx, deps, 3*time.Second, oneShot, "")
 }
 
 func mustEnv(key string) string {

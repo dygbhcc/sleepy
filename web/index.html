@@ -79,6 +79,7 @@ tr:hover{background:var(--surface2);cursor:pointer}
 .badge-progress{background:#3b82f620;color:var(--blue)}
 .badge-done{background:#22c55e20;color:var(--green)}
 .badge-failed{background:#ef444420;color:var(--red)}
+.badge-review{background:#f9731620;color:#f97316}
 
 /* Modal overlay */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:flex;align-items:start;justify-content:center;padding:40px 20px;overflow-y:auto}
@@ -407,7 +408,8 @@ const LANGS = {
     narrationWav: 'Audio File', thumbnailPng: 'Thumbnail',
     videoMp4: 'Video', metadataJson: 'Metadata',
     episodePack: 'Episode Pack',
-    onlyFailedRetry: 'Only FAILED runs can be retried',
+    needsReview: 'Needs Review',
+    onlyFailedRetry: 'Only FAILED or NEEDS_REVIEW runs can be retried',
     contentLanguage: 'Content Language',
     language: 'Language',
     langEn: 'English', langTr: 'Turkish', langPt: 'Portuguese', langEs: 'Spanish', langIt: 'Italian',
@@ -474,7 +476,8 @@ const LANGS = {
     narrationWav: 'Ses Dosyasi', thumbnailPng: 'Thumbnail',
     videoMp4: 'Video', metadataJson: 'Metadata',
     episodePack: 'Bolum Paketi',
-    onlyFailedRetry: 'Sadece FAILED calistirmalar tekrar denenebilir',
+    needsReview: 'Inceleme Gerekli',
+    onlyFailedRetry: 'Sadece FAILED veya NEEDS_REVIEW calistirmalar tekrar denenebilir',
     contentLanguage: 'Icerik Dili',
     language: 'Dil',
     langEn: 'Ingilizce', langTr: 'Turkce', langPt: 'Portekizce', langEs: 'Ispanyolca', langIt: 'Italyanca',
@@ -541,7 +544,8 @@ const LANGS = {
     narrationWav: 'Arquivo de Audio', thumbnailPng: 'Thumbnail',
     videoMp4: 'Video', metadataJson: 'Metadata',
     episodePack: 'Pacote do Episodio',
-    onlyFailedRetry: 'Apenas execucoes com falha podem ser retentadas',
+    needsReview: 'Revisao Necessaria',
+    onlyFailedRetry: 'Apenas execucoes com falha ou em revisao podem ser retentadas',
     contentLanguage: 'Idioma do Conteudo',
     language: 'Idioma',
     langEn: 'Ingles', langTr: 'Turco', langPt: 'Portugues', langEs: 'Espanhol', langIt: 'Italiano',
@@ -608,7 +612,8 @@ const LANGS = {
     narrationWav: 'Archivo de Audio', thumbnailPng: 'Thumbnail',
     videoMp4: 'Video', metadataJson: 'Metadata',
     episodePack: 'Paquete del Episodio',
-    onlyFailedRetry: 'Solo las ejecuciones fallidas pueden reintentarse',
+    needsReview: 'Revision Necesaria',
+    onlyFailedRetry: 'Solo las ejecuciones fallidas o en revision pueden reintentarse',
     contentLanguage: 'Idioma del Contenido',
     language: 'Idioma',
     langEn: 'Ingles', langTr: 'Turco', langPt: 'Portugues', langEs: 'Espanol', langIt: 'Italiano',
@@ -675,7 +680,8 @@ const LANGS = {
     narrationWav: 'File Audio', thumbnailPng: 'Thumbnail',
     videoMp4: 'Video', metadataJson: 'Metadata',
     episodePack: 'Pacchetto Episodio',
-    onlyFailedRetry: 'Solo le esecuzioni fallite possono essere ritentate',
+    needsReview: 'Revisione Necessaria',
+    onlyFailedRetry: 'Solo le esecuzioni fallite o in revisione possono essere ritentate',
     contentLanguage: 'Lingua del Contenuto',
     language: 'Lingua',
     langEn: 'Inglese', langTr: 'Turco', langPt: 'Portoghese', langEs: 'Spagnolo', langIt: 'Italiano',
@@ -742,12 +748,13 @@ let refreshTimer = null;
 let detailPollTimer = null;
 let detailRunID = null;
 
-const STATUSES = ['ALL','PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','DONE','FAILED'];
+const STATUSES = ['ALL','PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','DONE','FAILED','NEEDS_REVIEW'];
 const PIPELINE = ['PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','DONE'];
 
 function statusClass(s){
   if(s==='DONE'||s==='PACKAGED')return 'badge-done';
   if(s==='FAILED')return 'badge-failed';
+  if(s==='NEEDS_REVIEW')return 'badge-review';
   if(s==='PENDING')return 'badge-pending';
   return 'badge-progress';
 }
@@ -865,7 +872,7 @@ async function openDetail(id){
     const res=await fetch(API+'/api/runs/'+id);
     const data=await res.json();
     renderDetail(data);
-    if(data.run.Status!=='DONE'&&data.run.Status!=='FAILED'){
+    if(data.run.Status!=='DONE'&&data.run.Status!=='FAILED'&&data.run.Status!=='NEEDS_REVIEW'){
       detailPollTimer=setInterval(()=>pollDetail(id),3000);
     }
   }catch(e){
@@ -879,7 +886,7 @@ async function pollDetail(id){
     const res=await fetch(API+'/api/runs/'+id);
     const data=await res.json();
     renderDetail(data);
-    if(data.run.Status==='DONE'||data.run.Status==='FAILED'){
+    if(data.run.Status==='DONE'||data.run.Status==='FAILED'||data.run.Status==='NEEDS_REVIEW'){
       clearInterval(detailPollTimer);detailPollTimer=null;
       fetchRuns();
     }
@@ -985,11 +992,26 @@ function renderDetail(data){
     </div>`;
   }
 
-  document.getElementById('modalBody').innerHTML=progressHTML+errorHTML+detailHTML+assetsHTML+thumbHTML+videoHTML+scriptHTML;
+  // Autopilot info (attempts + last error)
+  let autopilotHTML='';
+  if(run.ScriptAttempt||run.VoiceAttempt||run.RenderAttempt||run.PackageAttempt){
+    autopilotHTML='<div class="section"><h3>Autopilot</h3><div class="detail-grid">';
+    autopilotHTML+=`<div class="detail-item"><div class="label">Script Attempts</div><div class="value">${run.ScriptAttempt}</div></div>`;
+    autopilotHTML+=`<div class="detail-item"><div class="label">Voice Attempts</div><div class="value">${run.VoiceAttempt}</div></div>`;
+    autopilotHTML+=`<div class="detail-item"><div class="label">Render Attempts</div><div class="value">${run.RenderAttempt}</div></div>`;
+    autopilotHTML+=`<div class="detail-item"><div class="label">Package Attempts</div><div class="value">${run.PackageAttempt}</div></div>`;
+    autopilotHTML+='</div>';
+    if(run.LastError){
+      autopilotHTML+=`<div class="error-box" style="margin-top:10px"><strong>Last Error:</strong>\n${esc(run.LastError)}</div>`;
+    }
+    autopilotHTML+='</div>';
+  }
+
+  document.getElementById('modalBody').innerHTML=progressHTML+errorHTML+detailHTML+autopilotHTML+assetsHTML+thumbHTML+videoHTML+scriptHTML;
 
   // Footer buttons
   let footerHTML='';
-  if(run.Status==='FAILED'){
+  if(run.Status==='FAILED'||run.Status==='NEEDS_REVIEW'){
     footerHTML+=`<button class="btn btn-primary btn-sm" onclick="retryRun('${run.ID}')">${t('retry')}</button>`;
   }
   footerHTML+=`<button class="btn btn-danger btn-sm" onclick="deleteRun('${run.ID}')">${t('delete')}</button>`;

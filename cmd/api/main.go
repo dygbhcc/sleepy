@@ -196,10 +196,13 @@ func handleRetryRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "run not found")
 		return
 	}
-	if run.Status != domain.StatusFailed {
-		writeErr(w, http.StatusBadRequest, "only FAILED runs can be retried")
+	if run.Status != domain.StatusFailed && run.Status != domain.StatusNeedsReview {
+		writeErr(w, http.StatusBadRequest, "only FAILED or NEEDS_REVIEW runs can be retried")
 		return
 	}
+
+	// Reset attempt counters so autopilot gets fresh retries.
+	_ = store.ResetAttempts(r.Context(), id)
 
 	// Find the last good status by checking which assets exist
 	lastGood := domain.StatusPending

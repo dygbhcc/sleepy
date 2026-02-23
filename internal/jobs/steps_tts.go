@@ -24,6 +24,22 @@ func stepTTS(ctx context.Context, deps Deps, run *domain.Run) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
+	// Check idempotency: if script hasn't changed since last voice attempt, skip.
+	scriptAsset, err := deps.DB.GetAsset(ctx, run.ID, domain.AssetScriptMD)
+	if err != nil {
+		return fmt.Errorf("no script found for TTS: %w", err)
+	}
+	currentHash, _ := computeFileHash(scriptAsset.Path)
+	if currentHash != "" && currentHash == run.VoiceHash {
+		// Input hasn't changed and we already have audio — check if it exists.
+		if audioAsset, err := deps.DB.GetAsset(ctx, run.ID, domain.AssetNarrationWAV); err == nil {
+			if info, err := os.Stat(audioAsset.Path); err == nil && info.Size() > 0 {
+				log.Printf("step_tts: skipping (input hash unchanged: %s)", currentHash[:12])
+				return nil
+			}
+		}
+	}
+
 	// Try SSML first (for ElevenLabs), fall back to plain markdown (for Edge TTS).
 	var text string
 	asset, err := deps.DB.GetAsset(ctx, run.ID, domain.AssetScriptSSML)
@@ -36,13 +52,10 @@ func stepTTS(ctx context.Context, deps Deps, run *domain.Run) error {
 	// If SSML is empty or starts with <speak>, and we have a markdown script,
 	// use that instead — Edge TTS doesn't support SSML.
 	if text == "" || needsPlainText(text) {
-		mdAsset, mdErr := deps.DB.GetAsset(ctx, run.ID, domain.AssetScriptMD)
-		if mdErr == nil {
-			raw, readErr := os.ReadFile(mdAsset.Path)
-			if readErr == nil && len(raw) > 0 {
-				text = string(raw)
-				log.Println("step_tts: using markdown script (plain text)")
-			}
+		raw, readErr := os.ReadFile(scriptAsset.Path)
+		if readErr == nil && len(raw) > 0 {
+			text = string(raw)
+			log.Println("step_tts: using markdown script (plain text)")
 		}
 	}
 	if text == "" {
@@ -61,6 +74,11 @@ func stepTTS(ctx context.Context, deps Deps, run *domain.Run) error {
 
 	if err := deps.DB.InsertAsset(ctx, run.ID, domain.AssetNarrationWAV, outPath); err != nil {
 		return fmt.Errorf("record narration asset: %w", err)
+	}
+
+	// Store voice hash (keyed on script input) for idempotency.
+	if currentHash != "" {
+		_ = deps.DB.UpdateRunHash(ctx, run.ID, "voice_hash", currentHash)
 	}
 
 	log.Printf("step_tts: done → %s", outPath)
