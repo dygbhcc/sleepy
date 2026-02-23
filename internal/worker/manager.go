@@ -114,6 +114,15 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 		})
 	}
 
+	// Bootstrap fix engine from historical outcomes.
+	outcomes, err := jobs.LoadFixOutcomes(context.Background(), m.db)
+	if err != nil {
+		log.Printf("worker-manager: failed to load fix outcomes (starting with empty scorer): %v", err)
+		outcomes = nil
+	} else {
+		log.Printf("worker-manager: loaded %d historical fix outcomes", len(outcomes))
+	}
+
 	deps := jobs.Deps{
 		DB:    m.db,
 		Store: storage.NewLocalFS(m.assetRoot),
@@ -130,6 +139,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 			MusicPath:  "assets/music/breakzstudios-calm-of-the-cosmos-165862.mp3",
 			MusicVol:   0.5,
 		},
+		FixEngine: jobs.NewFixEngine(outcomes),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

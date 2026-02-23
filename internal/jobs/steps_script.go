@@ -9,16 +9,19 @@ import (
 	"sleepy/internal/providers/llm"
 )
 
-func stepScript(ctx context.Context, deps Deps, run *domain.Run) error {
-	log.Printf("step_script: generating for run %s (%s / %s / %s / %dmin)",
-		run.ID, run.Series, run.Episode, run.Style, run.DurationMin)
+func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) error {
+	log.Printf("step_script: generating for run %s (%s / %s / %s / %dmin, target_words=%d)",
+		run.ID, run.Series, run.Episode, run.Style, run.DurationMin, policy.TargetWords)
 
 	result, err := deps.LLM.GenerateScript(ctx, llm.ScriptRequest{
-		Series:      run.Series,
-		Episode:     run.Episode,
-		Style:       run.Style,
-		Language:    run.Language,
-		DurationMin: run.DurationMin,
+		Series:           run.Series,
+		Episode:          run.Episode,
+		Style:            run.Style,
+		Language:         run.Language,
+		DurationMin:      run.DurationMin,
+		TargetWords:      policy.TargetWords,
+		Temperature:      policy.LLMTemperature,
+		ExtraInstruction: policy.LLMExtraInstruction,
 	})
 	if err != nil {
 		return err

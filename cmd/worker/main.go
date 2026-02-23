@@ -79,6 +79,15 @@ func main() {
 		})
 	}
 
+	// Bootstrap fix engine from historical outcomes.
+	outcomes, err := jobs.LoadFixOutcomes(context.Background(), database)
+	if err != nil {
+		log.Printf("warning: failed to load fix outcomes (starting with empty scorer): %v", err)
+		outcomes = nil
+	} else {
+		log.Printf("loaded %d historical fix outcomes for scorer", len(outcomes))
+	}
+
 	deps := jobs.Deps{
 		DB:    database,
 		Store: storage.NewLocalFS(assetRoot),
@@ -95,6 +104,7 @@ func main() {
 			MusicPath:  envOr("MUSIC_PATH", "assets/music/breakzstudios-calm-of-the-cosmos-165862.mp3"),
 			MusicVol:   0.5,
 		},
+		FixEngine: jobs.NewFixEngine(outcomes),
 	}
 
 	log.Printf("config: normalize=%v ffmpeg=%s ffprobe=%s", normalize, ffmpegBin, ffprobeBin)

@@ -29,6 +29,11 @@ type ScriptRequest struct {
 	Style       string // Cosmos | Earthside | Myth
 	Language    string // en, tr, pt, es, it
 	DurationMin int
+
+	// Override fields (set by fix engine; zero values = use defaults).
+	TargetWords      int     // explicit word target; 0 = derive from DurationMin
+	Temperature      float64 // 0 = use default (0.7)
+	ExtraInstruction string  // appended to system prompt
 }
 
 // ScriptResult contains the generated script in two formats.
@@ -61,14 +66,22 @@ func NewClient(cfg Config) *Client {
 // and retries up to 2 times on QA failure before returning an error.
 func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*ScriptResult, error) {
 	wordCount := req.DurationMin * 130
+	if req.TargetWords > 0 {
+		wordCount = req.TargetWords
+	}
 
 	userPrompt, err := buildPrompt(req, wordCount)
 	if err != nil {
 		return nil, fmt.Errorf("build prompt: %w", err)
 	}
 
+	sysPrompt := systemPrompt
+	if req.ExtraInstruction != "" {
+		sysPrompt += "\n\n" + req.ExtraInstruction
+	}
+
 	messages := []chatMsg{
-		{Role: "system", Content: systemPrompt},
+		{Role: "system", Content: sysPrompt},
 		{Role: "user", Content: userPrompt},
 	}
 
@@ -85,7 +98,7 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 			}
 		}
 
-		raw, err := c.chatCompletion(ctx, messages)
+		raw, err := c.chatCompletion(ctx, messages, req.Temperature)
 		if err != nil {
 			// On rate limit (typed TransientError), wait and retry.
 			if errs.IsTransient(err) && attempt < maxRetries {
@@ -147,11 +160,14 @@ type chatResp struct {
 	} `json:"error,omitempty"`
 }
 
-func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg) (string, error) {
+func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, temperature float64) (string, error) {
+	if temperature <= 0 {
+		temperature = 0.7
+	}
 	body, err := json.Marshal(chatReq{
 		Model:       c.cfg.Model,
 		Messages:    msgs,
-		Temperature: 0.7,
+		Temperature: temperature,
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)

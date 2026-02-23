@@ -25,14 +25,25 @@ type LanguageAwareTTS interface {
 	SynthesizeWithLang(ctx context.Context, text string, outPath string, lang string) error
 }
 
+// EdgeTTSOverridable is implemented by Edge TTS clients that support rate overrides.
+type EdgeTTSOverridable interface {
+	SynthesizeWithOpts(ctx context.Context, text string, outPath string, rateDelta int, lang string) error
+}
+
+// ElevenLabsOverridable is implemented by ElevenLabs clients that support parameter overrides.
+type ElevenLabsOverridable interface {
+	SynthesizeWithOpts(ctx context.Context, text string, outPath string, speedFactor, stability, similarityBoost float64) error
+}
+
 // Deps bundles every dependency the worker needs.
 type Deps struct {
-	DB     *db.DB
-	Store  storage.Store
-	LLM    *llm.Client
-	TTS    TTSSynthesizer
-	Image  *image.Client
-	Render render.RenderConfig
+	DB        *db.DB
+	Store     storage.Store
+	LLM       *llm.Client
+	TTS       TTSSynthesizer
+	Image     *image.Client
+	Render    render.RenderConfig
+	FixEngine *FixEngine // nil = legacy Decide() path
 }
 
 // RunWorker is a global worker loop that claims the next eligible run,
@@ -98,6 +109,12 @@ func RunWorker(ctx context.Context, deps Deps, pollInterval time.Duration, oneSh
 func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID string) error {
 	policy := PolicyForDuration(run.DurationMin)
 
+	// Load persisted fix overrides (survive worker restarts).
+	loadPersistedOverrides(run.PolicyOverridesJSON, &policy)
+	if run.PolicyOverridesJSON != "" && run.PolicyOverridesJSON != "{}" {
+		log.Printf("worker[%s]: loaded persisted overrides for run %s", workerID, run.ID)
+	}
+
 	// Terminal states — nothing to do.
 	if run.Status == domain.StatusDone || run.Status == domain.StatusFailed || run.Status == domain.StatusNeedsReview {
 		return nil
@@ -110,14 +127,14 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 	switch stage {
 	case domain.StatusPending:
 		_ = deps.DB.IncrementAttempt(ctx, run.ID, "script_attempt")
-		stepErr = stepScript(ctx, deps, run)
+		stepErr = stepScript(ctx, deps, run, policy)
 		if stepErr == nil {
 			report = qaScript(ctx, deps, run, policy)
 		}
 
 	case domain.StatusScripted:
 		_ = deps.DB.IncrementAttempt(ctx, run.ID, "voice_attempt")
-		stepErr = stepTTS(ctx, deps, run)
+		stepErr = stepTTS(ctx, deps, run, policy)
 		if stepErr == nil {
 			report = qaVoice(ctx, deps, run, policy)
 		}
@@ -130,7 +147,7 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 
 	case domain.StatusThumbnailed:
 		_ = deps.DB.IncrementAttempt(ctx, run.ID, "render_attempt")
-		stepErr = stepRender(ctx, deps, run)
+		stepErr = stepRender(ctx, deps, run, policy)
 		if stepErr == nil {
 			report = qaRender(ctx, deps, run, policy)
 		}
@@ -143,16 +160,15 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 		}
 
 	case domain.StatusPackaged:
-		// Final advancement to DONE — run final QA.
 		report = qaPackage(ctx, deps, run)
 		if report.Pass {
+			clearFixState(ctx, deps.DB, run.ID)
 			if err := deps.DB.UpdateRunStatus(ctx, run.ID, domain.StatusDone); err != nil {
 				return fmt.Errorf("advance to DONE: %w", err)
 			}
 			log.Printf("worker[%s]: run %s → DONE", workerID, run.ID)
 			return nil
 		}
-		// Final QA failed — fall through to decision handling below.
 
 	default:
 		return fmt.Errorf("unexpected run status: %s", run.Status)
@@ -163,19 +179,15 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 		_ = deps.DB.UpdateRunLastError(ctx, run.ID, stepErr.Error())
 
 		if isTransientError(stepErr) {
-			// Re-read for updated attempt counters.
 			run, _ = deps.DB.GetRun(ctx, run.ID)
 			totalAttempts := run.ScriptAttempt + run.VoiceAttempt + run.RenderAttempt + run.PackageAttempt
 			if totalAttempts > 10 {
 				return deps.DB.SetNeedsReview(ctx, run.ID, fmt.Sprintf("transient error after %d total attempts: %v", totalAttempts, stepErr))
 			}
-			// Don't sleep here — just leave the run in the same status.
-			// The next poll iteration will pick it up after pollInterval.
 			log.Printf("worker[%s]: transient error on run %s, will retry on next claim: %v", workerID, run.ID, stepErr)
 			return nil
 		}
 
-		// Non-transient step error — create a synthetic QA report for decision.
 		report = QAReport{
 			Stage:     string(stage),
 			RunID:     run.ID,
@@ -191,8 +203,17 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 		log.Printf("worker[%s]: failed to write QA report: %v", workerID, err)
 	}
 
-	// If QA passed, advance to next status.
+	// Re-read run for latest attempt counts.
+	run, err := deps.DB.GetRun(ctx, run.ID)
+	if err != nil {
+		return fmt.Errorf("get run for decision: %w", err)
+	}
+
+	// If QA passed, record outcome (success), clear fix state, advance.
 	if report.Pass {
+		recordFixOutcome(ctx, deps, run, stage, report, true)
+		clearFixState(ctx, deps.DB, run.ID)
+
 		next := domain.NextStatus(stage)
 		if err := deps.DB.UpdateRunStatus(ctx, run.ID, next); err != nil {
 			return fmt.Errorf("advance to %s: %w", next, err)
@@ -201,49 +222,108 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 		return nil
 	}
 
-	// QA failed — re-read run for latest attempt counts.
-	run, err := deps.DB.GetRun(ctx, run.ID)
-	if err != nil {
-		return fmt.Errorf("get run for decision: %w", err)
+	// QA failed — use FixEngine if available, else legacy Decide().
+	var fix FixPlan
+	if deps.FixEngine != nil {
+		fix = deps.FixEngine.DecideFix(stage, report, run, policy)
+		log.Printf("worker[%s]: run %s fix_engine → action=%s plan=%s", workerID, run.ID, fix.Action, fix.ID)
+	} else {
+		decision := Decide(stage, report, run, policy)
+		fix = FixPlan{
+			ID:           "legacy",
+			Action:       decision.Action,
+			TargetStatus: decision.TargetStatus,
+			Stage:        stage,
+			FailType:     report.FailType,
+		}
+		log.Printf("worker[%s]: run %s legacy → action=%s reason=%s", workerID, run.ID, decision.Action, decision.Reason)
 	}
 
-	// Stage-aware decision.
-	decision := Decide(stage, report, run, policy)
-	log.Printf("worker[%s]: run %s decision=%s reason=%s", workerID, run.ID, decision.Action, decision.Reason)
-	_ = deps.DB.UpdateRunLastError(ctx, run.ID, decision.Reason)
+	_ = deps.DB.UpdateRunLastError(ctx, run.ID, fmt.Sprintf("fix=%s action=%s failType=%s", fix.ID, fix.Action, fix.FailType))
 
-	switch decision.Action {
+	switch fix.Action {
 	case "advance":
+		clearFixState(ctx, deps.DB, run.ID)
 		next := domain.NextStatus(stage)
 		if err := deps.DB.UpdateRunStatus(ctx, run.ID, next); err != nil {
 			return fmt.Errorf("advance to %s: %w", next, err)
 		}
 		log.Printf("worker[%s]: run %s → %s", workerID, run.ID, next)
 
-	case "retry":
-		// Leave at target status — next poll will re-claim and re-execute.
-		if err := deps.DB.UpdateRunStatus(ctx, run.ID, decision.TargetStatus); err != nil {
-			return fmt.Errorf("reset to %s for retry: %w", decision.TargetStatus, err)
+	case "retry", "loopback":
+		// Track which fix plan is active for attempts_to_pass computation.
+		if fix.ID != run.ActiveFixPlanID {
+			currentAttempt := currentAttemptForStage(stage, run)
+			_ = deps.DB.UpdateActiveFixPlan(ctx, run.ID, fix.ID, currentAttempt)
 		}
-		log.Printf("worker[%s]: run %s reset to %s for retry", workerID, run.ID, decision.TargetStatus)
 
-	case "loopback":
-		if err := deps.DB.UpdateRunStatus(ctx, run.ID, decision.TargetStatus); err != nil {
-			return fmt.Errorf("loopback to %s: %w", decision.TargetStatus, err)
+		// Persist and apply overrides.
+		if fix.Overrides != nil {
+			if err := persistAndApply(ctx, deps.DB, run.ID, fix.Overrides, &policy); err != nil {
+				log.Printf("worker[%s]: failed to persist overrides: %v", workerID, err)
+			}
 		}
-		log.Printf("worker[%s]: run %s looped back to %s", workerID, run.ID, decision.TargetStatus)
+
+		if err := deps.DB.UpdateRunStatus(ctx, run.ID, fix.TargetStatus); err != nil {
+			return fmt.Errorf("reset to %s: %w", fix.TargetStatus, err)
+		}
+		log.Printf("worker[%s]: run %s → %s (%s, plan=%s)", workerID, run.ID, fix.TargetStatus, fix.Action, fix.ID)
 
 	case "needs_review":
-		if err := deps.DB.SetNeedsReview(ctx, run.ID, decision.Reason); err != nil {
+		recordFixOutcome(ctx, deps, run, stage, report, false)
+		if err := deps.DB.SetNeedsReview(ctx, run.ID, fmt.Sprintf("fix engine: %s (%s)", fix.ID, fix.FailType)); err != nil {
 			return fmt.Errorf("set needs review: %w", err)
 		}
-		log.Printf("worker[%s]: run %s → NEEDS_REVIEW: %s", workerID, run.ID, decision.Reason)
+		log.Printf("worker[%s]: run %s → NEEDS_REVIEW (plan=%s)", workerID, run.ID, fix.ID)
 
 	default:
-		return fmt.Errorf("unknown decision action: %s", decision.Action)
+		return fmt.Errorf("unknown fix action: %s", fix.Action)
 	}
 
 	return nil
+}
+
+// recordFixOutcome logs an outcome if the fix engine is active and a fix plan was tracked.
+func recordFixOutcome(ctx context.Context, deps Deps, run *domain.Run, stage domain.RunStatus, report QAReport, success bool) {
+	if deps.FixEngine == nil || run.ActiveFixPlanID == "" {
+		return
+	}
+
+	attemptsToPass := ComputeAttemptsToPass(
+		currentAttemptForStage(stage, run),
+		run.ActiveFixStartAttempt,
+	)
+
+	outcome := FixOutcome{
+		RunID:          run.ID,
+		Stage:          string(stage),
+		FailType:       string(report.FailType),
+		FixPlanID:      run.ActiveFixPlanID,
+		AttemptsToPass: attemptsToPass,
+		Success:        success,
+		Timestamp:      time.Now(),
+	}
+
+	deps.FixEngine.RecordOutcome(outcome)
+	if err := LogFixOutcome(ctx, deps.DB, outcome); err != nil {
+		log.Printf("worker: failed to log fix outcome: %v", err)
+	}
+}
+
+// currentAttemptForStage returns the current attempt count for the given stage.
+func currentAttemptForStage(stage domain.RunStatus, run *domain.Run) int {
+	switch stage {
+	case domain.StatusPending:
+		return run.ScriptAttempt
+	case domain.StatusScripted:
+		return run.VoiceAttempt
+	case domain.StatusThumbnailed:
+		return run.RenderAttempt
+	case domain.StatusRendered:
+		return run.PackageAttempt
+	default:
+		return 0
+	}
 }
 
 func sleep(ctx context.Context, d time.Duration) {

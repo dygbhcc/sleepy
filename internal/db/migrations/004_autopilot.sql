@@ -20,7 +20,8 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS locked_by       TEXT    DEFAULT NULL;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS locked_at       TIMESTAMPTZ DEFAULT NULL;
 
 -- Index for the autopilot worker to find claimable runs efficiently.
+-- Lock TTL check (locked_at < now() - 5min) is done at query time, not in the index,
+-- because now() is not IMMUTABLE.
 CREATE INDEX IF NOT EXISTS idx_runs_claimable
     ON runs(created_at ASC)
-    WHERE status NOT IN ('DONE','FAILED','NEEDS_REVIEW')
-      AND (locked_by IS NULL OR locked_at < now() - interval '5 minutes');
+    WHERE status NOT IN ('DONE','FAILED','NEEDS_REVIEW');

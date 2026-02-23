@@ -29,6 +29,11 @@ type Run struct {
 	// Run locking (TTL-based)
 	LockedBy *string
 	LockedAt *time.Time
+
+	// Fix engine fields
+	ActiveFixPlanID      string
+	ActiveFixStartAttempt int
+	PolicyOverridesJSON  string
 }
 
 // Asset is a file produced by a pipeline step.

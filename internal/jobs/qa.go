@@ -40,9 +40,10 @@ const (
 
 // QACheck is a single pass/fail assertion within a QA report.
 type QACheck struct {
-	Name    string `json:"name"`
-	Pass    bool   `json:"pass"`
-	Details string `json:"details"`
+	Name    string         `json:"name"`
+	Pass    bool           `json:"pass"`
+	Details string         `json:"details"`
+	Diag    map[string]any `json:"diag,omitempty"` // structured diagnostics for fix engine
 }
 
 // QAReport is the structured result of a stage gate.
@@ -94,24 +95,34 @@ func qaScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QA
 	wordCount := len(words)
 
 	// Word count range check (direct counts from policy).
+	wcDiag := map[string]any{
+		"actual_words": wordCount,
+		"min_words":    policy.MinWords,
+		"max_words":    policy.MaxWords,
+		"target_words": policy.TargetWords,
+		"delta_words":  wordCount - policy.TargetWords,
+	}
 	if wordCount < policy.MinWords {
 		report.Pass = false
 		report.FailType = FailWordcountLow
 		report.Checks = append(report.Checks, QACheck{
-			Name: "wordcount_min", Pass: false,
+			Name: "wordcount", Pass: false,
 			Details: fmt.Sprintf("word count %d < minimum %d", wordCount, policy.MinWords),
+			Diag:    wcDiag,
 		})
 	} else if wordCount > policy.MaxWords {
 		report.Pass = false
 		report.FailType = FailWordcountHigh
 		report.Checks = append(report.Checks, QACheck{
-			Name: "wordcount_max", Pass: false,
+			Name: "wordcount", Pass: false,
 			Details: fmt.Sprintf("word count %d > maximum %d", wordCount, policy.MaxWords),
+			Diag:    wcDiag,
 		})
 	} else {
 		report.Checks = append(report.Checks, QACheck{
-			Name: "wordcount_range", Pass: true,
+			Name: "wordcount", Pass: true,
 			Details: fmt.Sprintf("%d words (range %d–%d)", wordCount, policy.MinWords, policy.MaxWords),
+			Diag:    wcDiag,
 		})
 	}
 
@@ -186,6 +197,12 @@ func qaVoice(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QAR
 	tolerance := targetSec * policy.AudioTolerance
 	diff := math.Abs(dur - targetSec)
 
+	durDiag := map[string]any{
+		"actual_sec":    dur,
+		"target_sec":    targetSec,
+		"delta_sec":     dur - targetSec, // negative = too short, positive = too long
+		"tolerance_sec": tolerance,
+	}
 	if diff > tolerance {
 		report.Pass = false
 		report.FailType = FailAudioDurationOff
@@ -193,11 +210,13 @@ func qaVoice(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QAR
 			Name: "audio_duration", Pass: false,
 			Details: fmt.Sprintf("duration %.1fs, target %.1fs ±%.0f%% (diff %.1fs > tolerance %.1fs)",
 				dur, targetSec, policy.AudioTolerance*100, diff, tolerance),
+			Diag: durDiag,
 		})
 	} else {
 		report.Checks = append(report.Checks, QACheck{
 			Name: "audio_duration", Pass: true,
 			Details: fmt.Sprintf("duration %.1fs (target %.1fs, diff %.1fs within ±%.0f%%)", dur, targetSec, diff, policy.AudioTolerance*100),
+			Diag: durDiag,
 		})
 	}
 

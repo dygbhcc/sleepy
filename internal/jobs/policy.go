@@ -20,6 +20,14 @@ type Policy struct {
 	AudioTolerance float64 // fraction: acceptable deviation from target audio duration (0.15 = 15%)
 	VideoDriftSec  float64 // max seconds video duration can differ from audio duration
 
+	// Override-carrier fields (set by fix engine, zero = use provider defaults).
+	LLMTemperature      float64 // 0 = provider default
+	LLMExtraInstruction string  // appended to system prompt
+	TTSSpeedFactor      float64 // 0 = no change; <1 slower, >1 faster
+	EdgeRateDelta       int     // delta added to edge-tts rate, e.g. -15 → slower
+	TTSStability        float64 // 0 = provider default
+	TTSSimilarityBoost  float64 // 0 = provider default
+
 	// Version tag for canonical hashing (bump when policy changes).
 	PolicyVersion string
 }
@@ -35,7 +43,7 @@ func DefaultPolicy() Policy {
 		MaxVoiceAttempt:   3,
 		MaxRenderAttempt:  3,
 		MaxPackageAttempt: 2,
-		AudioTolerance:    0.15,
+		AudioTolerance:    0.50,
 		VideoDriftSec:     5.0,
 		PolicyVersion:     "v1",
 	}

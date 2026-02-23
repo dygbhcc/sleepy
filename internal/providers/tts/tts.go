@@ -47,6 +47,89 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
+// SynthesizeWithOpts generates speech with per-call overrides from the fix engine.
+func (c *Client) SynthesizeWithOpts(ctx context.Context, text string, outPath string, speedFactor, stability, similarityBoost float64) error {
+	mp3Path := outPath + ".tmp.mp3"
+	if err := c.callAPIWithOpts(ctx, text, mp3Path, speedFactor, stability, similarityBoost); err != nil {
+		return fmt.Errorf("elevenlabs api: %w", err)
+	}
+	defer os.Remove(mp3Path)
+	if c.cfg.Normalize {
+		return c.convertAndNormalize(ctx, mp3Path, outPath)
+	}
+	return c.convertToWAV(ctx, mp3Path, outPath)
+}
+
+func (c *Client) callAPIWithOpts(ctx context.Context, text, outPath string, speedFactor, stability, similarityBoost float64) error {
+	speed := c.cfg.Speed
+	if speedFactor > 0 {
+		speed *= speedFactor
+	}
+	stab := 0.80
+	if stability > 0 {
+		stab = stability
+	}
+	simBoost := 0.75
+	if similarityBoost > 0 {
+		simBoost = similarityBoost
+	}
+
+	body, err := json.Marshal(ttsReq{
+		Text:    text,
+		ModelID: c.cfg.ModelID,
+		Speed:   speed,
+		VoiceSettings: voiceSettings{
+			Stability:       stab,
+			SimilarityBoost: simBoost,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf(
+		"https://api.elevenlabs.io/v1/text-to-speech/%s?output_format=mp3_44100_128",
+		c.cfg.VoiceID,
+	)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("xi-api-key", c.cfg.APIKey)
+	req.Header.Set("Accept", "audio/mpeg")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		baseErr := fmt.Errorf("elevenlabs HTTP %d: %s", resp.StatusCode, truncateBytes(b, 500))
+		if resp.StatusCode == 429 || resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504 {
+			return errs.NewTransient("elevenlabs", resp.StatusCode, baseErr)
+		}
+		return baseErr
+	}
+
+	f, err := os.Create(outPath)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", outPath, err)
+	}
+	defer f.Close()
+
+	n, err := io.Copy(f, resp.Body)
+	if err != nil {
+		return fmt.Errorf("download audio: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("elevenlabs returned empty audio body")
+	}
+	return nil
+}
+
 // Synthesize sends text (plain or SSML) to ElevenLabs, downloads MP3,
 // post-processes to 44100 Hz mono WAV. When Config.Normalize is true,
 // applies EBU R128 loudnorm (loudnorm=I=-16:TP=-1.5:LRA=11).

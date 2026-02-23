@@ -12,7 +12,7 @@ import (
 	"sleepy/internal/render"
 )
 
-func stepRender(ctx context.Context, deps Deps, run *domain.Run) error {
+func stepRender(ctx context.Context, deps Deps, run *domain.Run, policy Policy) error {
 	log.Printf("step_render: rendering video for run %s", run.ID)
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)

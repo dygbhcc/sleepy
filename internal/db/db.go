@@ -41,14 +41,16 @@ func (d *DB) Close() error { return d.pool.Close() }
 
 const runColumns = `id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at,
 	script_attempt, voice_attempt, render_attempt, package_attempt, last_error, needs_review,
-	script_hash, voice_hash, render_hash, locked_by, locked_at`
+	script_hash, voice_hash, render_hash, locked_by, locked_at,
+	active_fix_plan_id, active_fix_start_attempt, policy_overrides_json`
 
 func scanRun(row interface{ Scan(...any) error }, r *domain.Run) error {
 	return row.Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
 		&r.Status, &r.ErrorText, &r.CreatedAt, &r.UpdatedAt,
 		&r.ScriptAttempt, &r.VoiceAttempt, &r.RenderAttempt, &r.PackageAttempt,
 		&r.LastError, &r.NeedsReview, &r.ScriptHash, &r.VoiceHash, &r.RenderHash,
-		&r.LockedBy, &r.LockedAt)
+		&r.LockedBy, &r.LockedAt,
+		&r.ActiveFixPlanID, &r.ActiveFixStartAttempt, &r.PolicyOverridesJSON)
 }
 
 // GetRun loads a run by ID.
@@ -173,6 +175,79 @@ func (d *DB) ResetAttempts(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// ---------- fix engine ----------
+
+// FixOutcomeRow is the DB-layer representation of a fix outcome.
+type FixOutcomeRow struct {
+	RunID          string
+	Stage          string
+	FailType       string
+	FixPlanID      string
+	AttemptsToPass int
+	CostEstimate   float64
+	Success        bool
+	Timestamp      time.Time
+}
+
+// InsertFixOutcome persists a fix outcome record.
+func (d *DB) InsertFixOutcome(ctx context.Context, o FixOutcomeRow) error {
+	_, err := d.pool.ExecContext(ctx,
+		`INSERT INTO fix_outcomes (run_id, stage, fail_type, fix_plan_id, attempts_to_pass, cost_estimate, success)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		o.RunID, o.Stage, o.FailType, o.FixPlanID, o.AttemptsToPass, o.CostEstimate, o.Success,
+	)
+	if err != nil {
+		return fmt.Errorf("insert fix outcome: %w", err)
+	}
+	return nil
+}
+
+// ListFixOutcomes loads all historical fix outcomes for scorer bootstrap.
+func (d *DB) ListFixOutcomes(ctx context.Context) ([]FixOutcomeRow, error) {
+	rows, err := d.pool.QueryContext(ctx,
+		`SELECT run_id, stage, fail_type, fix_plan_id, attempts_to_pass, cost_estimate, success, created_at
+		 FROM fix_outcomes ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list fix outcomes: %w", err)
+	}
+	defer rows.Close()
+
+	var results []FixOutcomeRow
+	for rows.Next() {
+		var r FixOutcomeRow
+		if err := rows.Scan(&r.RunID, &r.Stage, &r.FailType, &r.FixPlanID,
+			&r.AttemptsToPass, &r.CostEstimate, &r.Success, &r.Timestamp); err != nil {
+			return nil, fmt.Errorf("scan fix outcome: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// UpdateActiveFixPlan sets the active fix plan and the starting attempt count.
+func (d *DB) UpdateActiveFixPlan(ctx context.Context, id, planID string, startAttempt int) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET active_fix_plan_id = $1, active_fix_start_attempt = $2, updated_at = now()
+		 WHERE id = $3`, planID, startAttempt, id)
+	if err != nil {
+		return fmt.Errorf("update active fix plan: %w", err)
+	}
+	return nil
+}
+
+// UpdatePolicyOverrides persists policy overrides as JSON on a run.
+func (d *DB) UpdatePolicyOverrides(ctx context.Context, id, overridesJSON string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET policy_overrides_json = $1, updated_at = now() WHERE id = $2`,
+		overridesJSON, id)
+	if err != nil {
+		return fmt.Errorf("update policy overrides: %w", err)
+	}
+	return nil
+}
+
+// ---------- run locking ----------
 
 // ClaimNextRun atomically claims the next eligible run for processing.
 // A run is eligible if it is not in a terminal state and is either unlocked

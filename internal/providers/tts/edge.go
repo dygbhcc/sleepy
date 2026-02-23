@@ -64,10 +64,39 @@ func (c *EdgeClient) SynthesizeWithLang(ctx context.Context, text string, outPat
 	return c.synthesizeWithVoice(ctx, text, outPath, voice)
 }
 
+// SynthesizeWithOpts generates speech with per-call overrides (fix engine integration).
+func (c *EdgeClient) SynthesizeWithOpts(ctx context.Context, text string, outPath string, rateDelta int, lang string) error {
+	voice := c.cfg.Voice
+	if lang != "" {
+		voice = c.VoiceForLang(lang)
+	}
+	rate := c.cfg.Rate
+	if rateDelta != 0 {
+		// Parse current rate (e.g. "-20%") and apply delta.
+		rate = applyRateDelta(rate, rateDelta)
+	}
+	return c.synthesizeWithVoiceAndRate(ctx, text, outPath, voice, rate)
+}
+
+func applyRateDelta(currentRate string, delta int) string {
+	// Parse "-20%" → -20, apply delta, format back.
+	var current int
+	fmt.Sscanf(currentRate, "%d%%", &current)
+	adjusted := current + delta
+	if adjusted >= 0 {
+		return fmt.Sprintf("+%d%%", adjusted)
+	}
+	return fmt.Sprintf("%d%%", adjusted)
+}
+
 func (c *EdgeClient) synthesizeWithVoice(ctx context.Context, text string, outPath string, voice string) error {
+	return c.synthesizeWithVoiceAndRate(ctx, text, outPath, voice, c.cfg.Rate)
+}
+
+func (c *EdgeClient) synthesizeWithVoiceAndRate(ctx context.Context, text string, outPath string, voice string, rate string) error {
 	mp3Path := outPath + ".tmp.mp3"
 
-	log.Printf("edge-tts: synthesizing with voice=%s rate=%s", voice, c.cfg.Rate)
+	log.Printf("edge-tts: synthesizing with voice=%s rate=%s", voice, rate)
 
 	// Write text to temp file to avoid shell escaping issues.
 	txtPath := outPath + ".tmp.txt"
@@ -80,7 +109,7 @@ func (c *EdgeClient) synthesizeWithVoice(ctx context.Context, text string, outPa
 	// interpreting negative values like "-20%" as flags.
 	cmd := exec.CommandContext(ctx, "python3", "-m", "edge_tts",
 		"--voice="+voice,
-		"--rate="+c.cfg.Rate,
+		"--rate="+rate,
 		"--file="+txtPath,
 		"--write-media="+mp3Path,
 	)

@@ -18,7 +18,7 @@ func needsPlainText(text string) bool {
 	return strings.HasPrefix(t, "<speak") || strings.Contains(t, "<break")
 }
 
-func stepTTS(ctx context.Context, deps Deps, run *domain.Run) error {
+func stepTTS(ctx context.Context, deps Deps, run *domain.Run, policy Policy) error {
 	log.Printf("step_tts: synthesizing audio for run %s", run.ID)
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -63,8 +63,25 @@ func stepTTS(ctx context.Context, deps Deps, run *domain.Run) error {
 	}
 
 	outPath := deps.Store.Path(run.ID, "narration.wav")
-	// Use language-aware synthesis if the TTS provider supports it.
-	if laTTS, ok := deps.TTS.(LanguageAwareTTS); ok && run.Language != "" {
+
+	// Check if fix engine has TTS overrides to apply.
+	hasOverrides := policy.TTSSpeedFactor != 0 || policy.EdgeRateDelta != 0 ||
+		policy.TTSStability != 0 || policy.TTSSimilarityBoost != 0
+
+	if hasOverrides {
+		log.Printf("step_tts: applying fix overrides speed=%.2f rateDelta=%d stability=%.2f similarity=%.2f",
+			policy.TTSSpeedFactor, policy.EdgeRateDelta, policy.TTSStability, policy.TTSSimilarityBoost)
+	}
+
+	if edgeTTS, ok := deps.TTS.(EdgeTTSOverridable); ok && (hasOverrides || run.Language != "") {
+		if err := edgeTTS.SynthesizeWithOpts(ctx, text, outPath, policy.EdgeRateDelta, run.Language); err != nil {
+			return fmt.Errorf("tts synthesize: %w", err)
+		}
+	} else if elTTS, ok := deps.TTS.(ElevenLabsOverridable); ok && hasOverrides {
+		if err := elTTS.SynthesizeWithOpts(ctx, text, outPath, policy.TTSSpeedFactor, policy.TTSStability, policy.TTSSimilarityBoost); err != nil {
+			return fmt.Errorf("tts synthesize: %w", err)
+		}
+	} else if laTTS, ok := deps.TTS.(LanguageAwareTTS); ok && run.Language != "" {
 		if err := laTTS.SynthesizeWithLang(ctx, text, outPath, run.Language); err != nil {
 			return fmt.Errorf("tts synthesize: %w", err)
 		}
