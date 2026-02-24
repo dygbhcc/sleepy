@@ -50,6 +50,7 @@ func main() {
 	mux.HandleFunc("GET /api/runs/{id}", handleGetRun)
 	mux.HandleFunc("DELETE /api/runs/{id}", handleDeleteRun)
 	mux.HandleFunc("POST /api/runs/{id}/retry", handleRetryRun)
+	mux.HandleFunc("POST /api/runs/{id}/approve-voice", handleApproveVoice)
 	mux.HandleFunc("GET /api/runs/{id}/assets", handleListAssets)
 	mux.HandleFunc("GET /api/runs/{id}/script", handleGetScript)
 	mux.HandleFunc("PUT /api/runs/{id}/script", handleUpdateScript)
@@ -241,6 +242,25 @@ func handleRetryRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	run, _ = store.GetRun(r.Context(), id)
+	writeJSON(w, http.StatusOK, run)
+}
+
+func handleApproveVoice(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run, err := store.GetRun(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if run.Status != domain.StatusScripted {
+		writeErr(w, http.StatusBadRequest, "run must be in SCRIPTED status to approve voice")
+		return
+	}
+	if err := store.ApproveVoice(r.Context(), id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	run, _ = store.GetRun(r.Context(), id)
 	writeJSON(w, http.StatusOK, run)
 }

@@ -30,6 +30,9 @@ type Run struct {
 	LockedBy *string
 	LockedAt *time.Time
 
+	// Voice approval gate
+	VoiceApproved bool
+
 	// Fix engine fields
 	ActiveFixPlanID      string
 	ActiveFixStartAttempt int

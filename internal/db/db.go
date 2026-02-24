@@ -42,7 +42,7 @@ func (d *DB) Close() error { return d.pool.Close() }
 const runColumns = `id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at,
 	script_attempt, voice_attempt, render_attempt, package_attempt, last_error, needs_review,
 	script_hash, voice_hash, render_hash, locked_by, locked_at,
-	active_fix_plan_id, active_fix_start_attempt, policy_overrides_json`
+	voice_approved, active_fix_plan_id, active_fix_start_attempt, policy_overrides_json`
 
 func scanRun(row interface{ Scan(...any) error }, r *domain.Run) error {
 	return row.Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
@@ -50,7 +50,7 @@ func scanRun(row interface{ Scan(...any) error }, r *domain.Run) error {
 		&r.ScriptAttempt, &r.VoiceAttempt, &r.RenderAttempt, &r.PackageAttempt,
 		&r.LastError, &r.NeedsReview, &r.ScriptHash, &r.VoiceHash, &r.RenderHash,
 		&r.LockedBy, &r.LockedAt,
-		&r.ActiveFixPlanID, &r.ActiveFixStartAttempt, &r.PolicyOverridesJSON)
+		&r.VoiceApproved, &r.ActiveFixPlanID, &r.ActiveFixStartAttempt, &r.PolicyOverridesJSON)
 }
 
 // GetRun loads a run by ID.
@@ -247,6 +247,16 @@ func (d *DB) UpdatePolicyOverrides(ctx context.Context, id, overridesJSON string
 	return nil
 }
 
+// ApproveVoice marks a run as approved for TTS synthesis.
+func (d *DB) ApproveVoice(ctx context.Context, id string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET voice_approved = true, updated_at = now() WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("approve voice: %w", err)
+	}
+	return nil
+}
+
 // ---------- run locking ----------
 
 // ClaimNextRun atomically claims the next eligible run for processing.
@@ -260,6 +270,7 @@ func (d *DB) ClaimNextRun(ctx context.Context, workerID string) (*domain.Run, er
 		 WHERE id = (
 		     SELECT id FROM runs
 		     WHERE status NOT IN ('DONE','FAILED','NEEDS_REVIEW')
+		       AND NOT (status = 'SCRIPTED' AND voice_approved = false)
 		       AND (locked_by IS NULL OR locked_at < now() - interval '5 minutes')
 		     ORDER BY created_at ASC
 		     LIMIT 1
