@@ -19,11 +19,13 @@ import (
 
 // Manager controls the lifecycle of an in-process worker goroutine.
 type Manager struct {
-	db        *db.DB
-	assetRoot string
-	mu        sync.Mutex
-	cancel    context.CancelFunc
-	running   bool
+	db          *db.DB
+	assetRoot   string
+	Concurrency int // number of parallel workers; 0 or 1 = single worker
+	mu          sync.Mutex
+	cancel      context.CancelFunc
+	running     bool
+	wg          sync.WaitGroup
 }
 
 // NewManager creates a new worker manager.
@@ -146,13 +148,30 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 	m.cancel = cancel
 	m.running = true
 
+	n := m.Concurrency
+	if n < 1 {
+		n = 1
+	}
+	log.Printf("worker-manager: launching %d worker goroutine(s)", n)
+
+	for i := 0; i < n; i++ {
+		workerID := fmt.Sprintf("worker-%d", i)
+		m.wg.Add(1)
+		go func(id string) {
+			defer m.wg.Done()
+			jobs.RunWorker(ctx, deps, 3*time.Second, false, id)
+			log.Printf("worker-manager: %s exited", id)
+		}(workerID)
+	}
+
+	// Background goroutine to update state when all workers finish.
 	go func() {
-		jobs.RunWorker(ctx, deps, 3*time.Second, false, "")
+		m.wg.Wait()
 		m.mu.Lock()
 		m.running = false
 		m.cancel = nil
 		m.mu.Unlock()
-		log.Println("worker-manager: worker goroutine exited")
+		log.Println("worker-manager: all worker goroutines exited")
 	}()
 
 	return nil
