@@ -499,11 +499,15 @@ func (d *DB) ListJobs(ctx context.Context, runID string) ([]domain.Job, error) {
 func (d *DB) GetWorkerSettings(ctx context.Context) (*domain.WorkerSettings, error) {
 	s := &domain.WorkerSettings{}
 	err := d.pool.QueryRowContext(ctx,
-		`SELECT mode, groq_api_key, openai_api_key, openai_base_url, openai_model,
+		`SELECT mode,
+		        worker_mode, require_voice_approval, max_inflight_script, max_inflight_tts, max_inflight_render,
+		        groq_api_key, openai_api_key, openai_base_url, openai_model,
 		        elevenlabs_api_key, elevenlabs_voice_id, elevenlabs_model_id, elevenlabs_speed,
 		        edge_voice, edge_rate, normalize, updated_at
 		 FROM worker_settings WHERE id = 1`,
-	).Scan(&s.Mode, &s.GroqAPIKey, &s.OpenAIAPIKey, &s.OpenAIBaseURL, &s.OpenAIModel,
+	).Scan(&s.Mode,
+		&s.WorkerMode, &s.RequireVoiceApproval, &s.MaxInflightScript, &s.MaxInflightTTS, &s.MaxInflightRender,
+		&s.GroqAPIKey, &s.OpenAIAPIKey, &s.OpenAIBaseURL, &s.OpenAIModel,
 		&s.ElevenLabsAPIKey, &s.ElevenLabsVoiceID, &s.ElevenLabsModelID, &s.ElevenLabsSpeed,
 		&s.EdgeVoice, &s.EdgeRate, &s.Normalize, &s.UpdatedAt)
 	if err != nil {
@@ -516,11 +520,15 @@ func (d *DB) GetWorkerSettings(ctx context.Context) (*domain.WorkerSettings, err
 func (d *DB) SaveWorkerSettings(ctx context.Context, s *domain.WorkerSettings) error {
 	_, err := d.pool.ExecContext(ctx,
 		`UPDATE worker_settings SET
-			mode = $1, groq_api_key = $2, openai_api_key = $3, openai_base_url = $4, openai_model = $5,
-			elevenlabs_api_key = $6, elevenlabs_voice_id = $7, elevenlabs_model_id = $8, elevenlabs_speed = $9,
-			edge_voice = $10, edge_rate = $11, normalize = $12, updated_at = now()
+			mode = $1,
+			worker_mode = $2, require_voice_approval = $3, max_inflight_script = $4, max_inflight_tts = $5, max_inflight_render = $6,
+			groq_api_key = $7, openai_api_key = $8, openai_base_url = $9, openai_model = $10,
+			elevenlabs_api_key = $11, elevenlabs_voice_id = $12, elevenlabs_model_id = $13, elevenlabs_speed = $14,
+			edge_voice = $15, edge_rate = $16, normalize = $17, updated_at = now()
 		 WHERE id = 1`,
-		s.Mode, s.GroqAPIKey, s.OpenAIAPIKey, s.OpenAIBaseURL, s.OpenAIModel,
+		s.Mode,
+		s.WorkerMode, s.RequireVoiceApproval, s.MaxInflightScript, s.MaxInflightTTS, s.MaxInflightRender,
+		s.GroqAPIKey, s.OpenAIAPIKey, s.OpenAIBaseURL, s.OpenAIModel,
 		s.ElevenLabsAPIKey, s.ElevenLabsVoiceID, s.ElevenLabsModelID, s.ElevenLabsSpeed,
 		s.EdgeVoice, s.EdgeRate, s.Normalize,
 	)

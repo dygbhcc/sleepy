@@ -63,6 +63,14 @@ type Job struct {
 // WorkerSettings holds the singleton worker configuration.
 type WorkerSettings struct {
 	Mode              string
+
+	// Throughput / safety knobs (HT-01).
+	WorkerMode           string // "SAFE" (default) or "THROUGHPUT"
+	RequireVoiceApproval bool   // true = gate TTS behind approval (default true)
+	MaxInflightScript    int    // max concurrent script workers (default 1)
+	MaxInflightTTS       int    // max concurrent TTS workers (default 1)
+	MaxInflightRender    int    // max concurrent render workers (default 1)
+
 	GroqAPIKey        string
 	OpenAIAPIKey      string
 	OpenAIBaseURL     string
