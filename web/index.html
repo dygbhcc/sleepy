@@ -81,6 +81,20 @@ tr:hover{background:var(--surface2);cursor:pointer}
 .badge-failed{background:#ef444420;color:var(--red)}
 .badge-review{background:#f9731620;color:#f97316}
 
+/* Inline pipeline progress (table rows) */
+.pipeline-progress{display:flex;align-items:center;gap:2px;min-width:180px}
+.pipeline-progress .pip{flex:1;height:6px;border-radius:3px;background:var(--surface2);transition:background .3s}
+.pipeline-progress .pip.done{background:var(--green)}
+.pipeline-progress .pip.current{background:var(--blue);animation:pipPulse 1.5s infinite}
+.pipeline-progress .pip.failed{background:var(--red)}
+.pipeline-progress .pip.review{background:#f97316}
+@keyframes pipPulse{0%,100%{opacity:1}50%{opacity:.4}}
+.pipeline-label{font-size:11px;color:var(--text2);margin-left:6px;white-space:nowrap}
+.pipeline-wrap{display:flex;flex-direction:column;gap:3px}
+.pipeline-attempts{font-size:10px;color:var(--text2);display:flex;gap:6px}
+.pipeline-attempts span{opacity:.6}
+.pipeline-attempts span.active{opacity:1;color:var(--accent)}
+
 /* Modal overlay */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:flex;align-items:start;justify-content:center;padding:40px 20px;overflow-y:auto}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:800px;animation:slideIn .2s ease}
@@ -224,9 +238,8 @@ tr:hover{background:var(--surface2);cursor:pointer}
             <th data-i18n="series"></th>
             <th data-i18n="episode"></th>
             <th data-i18n="style"></th>
-            <th data-i18n="language"></th>
             <th data-i18n="duration"></th>
-            <th data-i18n="status"></th>
+            <th data-i18n="progress"></th>
             <th data-i18n="date"></th>
           </tr>
         </thead>
@@ -439,6 +452,10 @@ const LANGS = {
     workerStarted: 'Worker started!',
     workerStoppedMsg: 'Worker stopped.',
     missingApiKey: 'Please configure the required API keys first.',
+    progress: 'Progress',
+    stageScript: 'Script', stageVoice: 'Voice', stageThumbnail: 'Thumb',
+    stageRender: 'Render', stagePackage: 'Pack', stageDone: 'Done',
+    attempt: 'attempt', attempts: 'attempts',
   },
   tr: {
     controlPanel: 'Kontrol Paneli',
@@ -507,6 +524,10 @@ const LANGS = {
     workerStarted: 'Worker baslatildi!',
     workerStoppedMsg: 'Worker durduruldu.',
     missingApiKey: 'Lutfen once gerekli API anahtarlarini yapilandirin.',
+    progress: 'Ilerleme',
+    stageScript: 'Script', stageVoice: 'Ses', stageThumbnail: 'Thumb',
+    stageRender: 'Render', stagePackage: 'Paket', stageDone: 'Bitti',
+    attempt: 'deneme', attempts: 'deneme',
   },
   pt: {
     controlPanel: 'Painel de Controle',
@@ -575,6 +596,10 @@ const LANGS = {
     workerStarted: 'Worker iniciado!',
     workerStoppedMsg: 'Worker parado.',
     missingApiKey: 'Por favor, configure as chaves de API necessarias primeiro.',
+    progress: 'Progresso',
+    stageScript: 'Script', stageVoice: 'Voz', stageThumbnail: 'Thumb',
+    stageRender: 'Render', stagePackage: 'Pacote', stageDone: 'Pronto',
+    attempt: 'tentativa', attempts: 'tentativas',
   },
   es: {
     controlPanel: 'Panel de Control',
@@ -643,6 +668,10 @@ const LANGS = {
     workerStarted: 'Worker iniciado!',
     workerStoppedMsg: 'Worker detenido.',
     missingApiKey: 'Por favor, configure las claves de API necesarias primero.',
+    progress: 'Progreso',
+    stageScript: 'Script', stageVoice: 'Voz', stageThumbnail: 'Thumb',
+    stageRender: 'Render', stagePackage: 'Paquete', stageDone: 'Listo',
+    attempt: 'intento', attempts: 'intentos',
   },
   it: {
     controlPanel: 'Pannello di Controllo',
@@ -711,6 +740,10 @@ const LANGS = {
     workerStarted: 'Worker avviato!',
     workerStoppedMsg: 'Worker fermato.',
     missingApiKey: 'Per favore, configura prima le chiavi API necessarie.',
+    progress: 'Progresso',
+    stageScript: 'Script', stageVoice: 'Voce', stageThumbnail: 'Thumb',
+    stageRender: 'Render', stagePackage: 'Pacch.', stageDone: 'Fatto',
+    attempt: 'tentativo', attempts: 'tentativi',
   }
 };
 
@@ -818,18 +851,81 @@ function renderTable(){
   const body=document.getElementById('runsBody');
   const filtered=currentFilter==='ALL'?allRuns:allRuns.filter(r=>r.Status===currentFilter);
   if(!filtered.length){
-    body.innerHTML=`<tr class="empty-row"><td colspan="7">${t('noRunsYet')}</td></tr>`;
+    body.innerHTML=`<tr class="empty-row"><td colspan="6">${t('noRunsYet')}</td></tr>`;
     return;
   }
   body.innerHTML=filtered.map(r=>`<tr onclick="openDetail('${r.ID}')">
     <td>${esc(r.Series)}</td>
     <td>${esc(r.Episode)}</td>
     <td>${esc(r.Style)}</td>
-    <td>${langDisplay(r.Language)}</td>
     <td>${r.DurationMin} ${t('minuteShort')}</td>
-    <td><span class="badge ${statusClass(r.Status)}">${r.Status}</span></td>
+    <td>${renderPipelineProgress(r)}</td>
     <td>${fmtDate(r.CreatedAt)}</td>
   </tr>`).join('');
+}
+
+function renderPipelineProgress(run){
+  // 6 steps: PENDING→SCRIPTED→VOICED→THUMBNAILED→RENDERED→PACKAGED→DONE
+  const steps=[
+    {status:'PENDING',    label:t('stageScript')},
+    {status:'SCRIPTED',   label:t('stageVoice')},
+    {status:'VOICED',     label:t('stageThumbnail')},
+    {status:'THUMBNAILED',label:t('stageRender')},
+    {status:'RENDERED',   label:t('stagePackage')},
+    {status:'PACKAGED',   label:t('stageDone')},
+  ];
+  const isFailed=run.Status==='FAILED';
+  const isReview=run.Status==='NEEDS_REVIEW';
+  const isDone=run.Status==='DONE';
+  const curIdx=PIPELINE.indexOf(run.Status);
+
+  let pips='';
+  let currentLabel='';
+  steps.forEach((step,i)=>{
+    const stepIdx=PIPELINE.indexOf(step.status);
+    let cls='';
+    if(isDone){
+      cls='done';
+    } else if(isFailed){
+      cls=stepIdx<curIdx?'done':stepIdx===curIdx?'failed':'';
+    } else if(isReview){
+      cls=stepIdx<curIdx?'done':stepIdx===curIdx?'review':'';
+    } else {
+      if(stepIdx<curIdx) cls='done';
+      else if(stepIdx===curIdx) cls='current';
+    }
+    if(stepIdx===curIdx && !isDone) currentLabel=step.label;
+    pips+=`<div class="pip ${cls}" title="${step.label}"></div>`;
+  });
+
+  // Status label with badge
+  let label='';
+  if(isDone){
+    label=`<span class="badge badge-done">DONE</span>`;
+  } else if(isFailed){
+    label=`<span class="badge badge-failed">FAILED</span>`;
+  } else if(isReview){
+    label=`<span class="badge badge-review">REVIEW</span>`;
+  } else {
+    label=`<span class="pipeline-label">${currentLabel}</span>`;
+  }
+
+  // Attempt counters
+  const totalAttempts=(run.ScriptAttempt||0)+(run.VoiceAttempt||0)+(run.RenderAttempt||0)+(run.PackageAttempt||0);
+  let attemptsHTML='';
+  if(totalAttempts>0){
+    const parts=[];
+    if(run.ScriptAttempt) parts.push(`<span class="${run.Status==='PENDING'?'active':''}">S:${run.ScriptAttempt}</span>`);
+    if(run.VoiceAttempt) parts.push(`<span class="${run.Status==='SCRIPTED'?'active':''}">V:${run.VoiceAttempt}</span>`);
+    if(run.RenderAttempt) parts.push(`<span class="${run.Status==='THUMBNAILED'?'active':''}">R:${run.RenderAttempt}</span>`);
+    if(run.PackageAttempt) parts.push(`<span class="${run.Status==='RENDERED'?'active':''}">P:${run.PackageAttempt}</span>`);
+    attemptsHTML=`<div class="pipeline-attempts">${parts.join('')}</div>`;
+  }
+
+  return `<div class="pipeline-wrap">
+    <div style="display:flex;align-items:center">${pips}${label}</div>
+    ${attemptsHTML}
+  </div>`;
 }
 
 // ==================== Fetch runs ====================

@@ -181,7 +181,7 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 		if isTransientError(stepErr) {
 			run, _ = deps.DB.GetRun(ctx, run.ID)
 			totalAttempts := run.ScriptAttempt + run.VoiceAttempt + run.RenderAttempt + run.PackageAttempt
-			if totalAttempts > 10 {
+			if totalAttempts > 20 {
 				return deps.DB.SetNeedsReview(ctx, run.ID, fmt.Sprintf("transient error after %d total attempts: %v", totalAttempts, stepErr))
 			}
 			log.Printf("worker[%s]: transient error on run %s, will retry on next claim: %v", workerID, run.ID, stepErr)

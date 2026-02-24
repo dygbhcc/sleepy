@@ -45,7 +45,7 @@ func (fe *FixEngine) DecideFix(
 
 	// Safety: global attempt ceiling.
 	totalAttempts := run.ScriptAttempt + run.VoiceAttempt + run.RenderAttempt + run.PackageAttempt
-	if totalAttempts >= 10 {
+	if totalAttempts >= 20 {
 		return FixPlan{
 			ID: "global_max_attempts", Action: "needs_review",
 			Stage: stage, FailType: report.FailType,
