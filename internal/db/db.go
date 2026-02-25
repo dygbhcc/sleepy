@@ -261,8 +261,15 @@ func (d *DB) ApproveVoice(ctx context.Context, id string) error {
 
 // ClaimNextRun atomically claims the next eligible run for processing.
 // A run is eligible if it is not in a terminal state and is either unlocked
-// or has an expired lock (older than 5 minutes). Returns nil, nil if no run is available.
-func (d *DB) ClaimNextRun(ctx context.Context, workerID string) (*domain.Run, error) {
+// or has an expired lock (older than 5 minutes).
+// If requireVoiceApproval is true, SCRIPTED runs without voice_approved are skipped.
+// Returns nil, nil if no run is available.
+func (d *DB) ClaimNextRun(ctx context.Context, workerID string, requireVoiceApproval bool) (*domain.Run, error) {
+	voiceGate := ""
+	if requireVoiceApproval {
+		voiceGate = "AND NOT (status = 'SCRIPTED' AND voice_approved = false)"
+	}
+
 	r := &domain.Run{}
 	err := scanRun(d.pool.QueryRowContext(ctx,
 		`UPDATE runs
@@ -270,7 +277,7 @@ func (d *DB) ClaimNextRun(ctx context.Context, workerID string) (*domain.Run, er
 		 WHERE id = (
 		     SELECT id FROM runs
 		     WHERE status NOT IN ('DONE','FAILED','NEEDS_REVIEW')
-		       AND NOT (status = 'SCRIPTED' AND voice_approved = false)
+		       `+voiceGate+`
 		       AND (locked_by IS NULL OR locked_at < now() - interval '5 minutes')
 		     ORDER BY created_at ASC
 		     LIMIT 1

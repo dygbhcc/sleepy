@@ -126,6 +126,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 	}
 
 	deps := jobs.Deps{
+		RequireVoiceApproval: settings.RequireVoiceApproval,
 		DB:    m.db,
 		Store: storage.NewLocalFS(m.assetRoot),
 		LLM:   llmClient,

@@ -44,6 +44,7 @@ type Deps struct {
 	Image     *image.Client
 	Render    render.RenderConfig
 	FixEngine *FixEngine // nil = legacy Decide() path
+	RequireVoiceApproval bool // true = gate TTS behind manual approval (SAFE default)
 }
 
 // RunWorker is a global worker loop that claims the next eligible run,
@@ -69,7 +70,7 @@ func RunWorker(ctx context.Context, deps Deps, pollInterval time.Duration, oneSh
 		}
 
 		// Claim the next eligible run (atomic, skip-locked).
-		run, err := deps.DB.ClaimNextRun(ctx, workerID)
+		run, err := deps.DB.ClaimNextRun(ctx, workerID, deps.RequireVoiceApproval)
 		if err != nil {
 			log.Printf("worker[%s]: claim error: %v", workerID, err)
 			sleep(ctx, pollInterval)
