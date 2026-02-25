@@ -188,35 +188,40 @@ tr:hover{background:var(--surface2);cursor:pointer}
       <h2 data-i18n="createEpisode"></h2>
       <form id="createForm">
         <div class="form-group">
-          <label data-i18n="series"></label>
-          <input type="text" id="fSeries" data-i18n-placeholder="seriesPlaceholder" required>
-        </div>
-        <div class="form-group">
           <label data-i18n="episode"></label>
-          <input type="text" id="fEpisode" data-i18n-placeholder="episodePlaceholder" required>
+          <input type="text" id="fEpisode" data-i18n-placeholder="episodePlaceholder">
         </div>
-        <div class="form-group">
-          <label data-i18n="style"></label>
-          <select id="fStyle">
-            <option value="Cosmos">Cosmos</option>
-            <option value="Earthside">Earthside</option>
-            <option value="Myth">Myth</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label data-i18n="contentLanguage"></label>
-          <select id="fLanguage">
-            <option value="en">English</option>
-            <option value="tr">Turkce</option>
-            <option value="pt">Portugues</option>
-            <option value="es">Espanol</option>
-            <option value="it">Italiano</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label data-i18n="durationMin"></label>
-          <input type="number" id="fDuration" value="30" min="1" max="180">
-        </div>
+        <details id="advancedToggle" style="margin-bottom:12px">
+          <summary style="cursor:pointer;color:var(--text2);font-size:0.9em;user-select:none" data-i18n="advanced"></summary>
+          <div style="margin-top:8px">
+            <div class="form-group">
+              <label data-i18n="series"></label>
+              <input type="text" id="fSeries" data-i18n-placeholder="seriesPlaceholder">
+            </div>
+            <div class="form-group">
+              <label data-i18n="style"></label>
+              <select id="fStyle">
+                <option value="Cosmos">Cosmos</option>
+                <option value="Earthside">Earthside</option>
+                <option value="Myth">Myth</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label data-i18n="contentLanguage"></label>
+              <select id="fLanguage">
+                <option value="en">English</option>
+                <option value="tr">Turkce</option>
+                <option value="pt">Portugues</option>
+                <option value="es">Espanol</option>
+                <option value="it">Italiano</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label data-i18n="durationMin"></label>
+              <input type="number" id="fDuration" value="30" min="1" max="180">
+            </div>
+          </div>
+        </details>
         <button type="submit" class="btn btn-primary btn-block" data-i18n="create"></button>
       </form>
     </div>
@@ -388,7 +393,7 @@ tr:hover{background:var(--surface2);cursor:pointer}
 const LANGS = {
   en: {
     controlPanel: 'Control Panel',
-    createEpisode: 'Create New Episode',
+    createEpisode: 'Create New Episode', advanced: 'Advanced options',
     series: 'Series', episode: 'Episode', style: 'Style',
     durationMin: 'Duration (minutes)', duration: 'Duration',
     create: 'Create', summary: 'Summary', allRuns: 'All Runs',
@@ -464,7 +469,7 @@ const LANGS = {
   },
   tr: {
     controlPanel: 'Kontrol Paneli',
-    createEpisode: 'Yeni Bolum Olustur',
+    createEpisode: 'Yeni Bolum Olustur', advanced: 'Gelismis secenekler',
     series: 'Seri', episode: 'Bolum', style: 'Stil',
     durationMin: 'Sure (dakika)', duration: 'Sure',
     create: 'Olustur', summary: 'Ozet', allRuns: 'Tum Calistirmalar',
@@ -540,7 +545,7 @@ const LANGS = {
   },
   pt: {
     controlPanel: 'Painel de Controle',
-    createEpisode: 'Criar Novo Episodio',
+    createEpisode: 'Criar Novo Episodio', advanced: 'Opcoes avancadas',
     series: 'Serie', episode: 'Episodio', style: 'Estilo',
     durationMin: 'Duracao (minutos)', duration: 'Duracao',
     create: 'Criar', summary: 'Resumo', allRuns: 'Todas as Execucoes',
@@ -616,7 +621,7 @@ const LANGS = {
   },
   es: {
     controlPanel: 'Panel de Control',
-    createEpisode: 'Crear Nuevo Episodio',
+    createEpisode: 'Crear Nuevo Episodio', advanced: 'Opciones avanzadas',
     series: 'Serie', episode: 'Episodio', style: 'Estilo',
     durationMin: 'Duracion (minutos)', duration: 'Duracion',
     create: 'Crear', summary: 'Resumen', allRuns: 'Todas las Ejecuciones',
@@ -692,7 +697,7 @@ const LANGS = {
   },
   it: {
     controlPanel: 'Pannello di Controllo',
-    createEpisode: 'Crea Nuovo Episodio',
+    createEpisode: 'Crea Nuovo Episodio', advanced: 'Opzioni avanzate',
     series: 'Serie', episode: 'Episodio', style: 'Stile',
     durationMin: 'Durata (minuti)', duration: 'Durata',
     create: 'Crea', summary: 'Riepilogo', allRuns: 'Tutte le Esecuzioni',
@@ -966,12 +971,13 @@ async function fetchRuns(){
 // ==================== Create run ====================
 document.getElementById('createForm').onsubmit=async(e)=>{
   e.preventDefault();
+  const adv=document.getElementById('advancedToggle').open;
   const body={
-    series:document.getElementById('fSeries').value.trim(),
     episode:document.getElementById('fEpisode').value.trim(),
-    style:document.getElementById('fStyle').value,
-    language:document.getElementById('fLanguage').value,
-    duration_min:parseInt(document.getElementById('fDuration').value)||30
+    series:adv?document.getElementById('fSeries').value.trim():'',
+    style:adv?document.getElementById('fStyle').value:'',
+    language:adv?document.getElementById('fLanguage').value:'',
+    duration_min:adv?(parseInt(document.getElementById('fDuration').value)||30):0
   };
   try{
     const res=await fetch(API+'/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

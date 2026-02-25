@@ -113,6 +113,26 @@ func isStageExhausted(stage domain.RunStatus, ft FailType, run *domain.Run, poli
 	case ft == FailMissingFile:
 		return isMissingFileExhausted(stage, run, policy)
 	default:
+		// FailUnknown, FailRateLimited, etc.: use stage-based attempt counter
+		// so the run gets retry chances instead of immediately going to needs_review.
+		return isStageAttemptExhausted(stage, run, policy)
+	}
+}
+
+// isStageAttemptExhausted checks per-stage attempt limits based on the current
+// pipeline stage. Used for FailTypes that don't map to a specific counter
+// (e.g. FailUnknown, FailRateLimited).
+func isStageAttemptExhausted(stage domain.RunStatus, run *domain.Run, policy Policy) bool {
+	switch stage {
+	case domain.StatusPending:
+		return run.ScriptAttempt >= policy.MaxScriptAttempt
+	case domain.StatusScripted:
+		return run.VoiceAttempt >= policy.MaxVoiceAttempt
+	case domain.StatusThumbnailed:
+		return run.RenderAttempt >= policy.MaxRenderAttempt
+	case domain.StatusRendered:
+		return run.PackageAttempt >= policy.MaxPackageAttempt
+	default:
 		return true
 	}
 }

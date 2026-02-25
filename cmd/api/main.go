@@ -121,9 +121,11 @@ func handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	if req.Series == "" || req.Episode == "" {
-		writeErr(w, http.StatusBadRequest, "series and episode are required")
-		return
+	if req.Series == "" {
+		req.Series = "Cosmos"
+	}
+	if req.Episode == "" {
+		req.Episode = "Untitled"
 	}
 	if req.Style == "" {
 		req.Style = "Cosmos"
