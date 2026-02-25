@@ -127,6 +127,11 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 
 	deps := jobs.Deps{
 		RequireVoiceApproval: settings.RequireVoiceApproval,
+		InflightLimits: jobs.InflightLimits{
+			Script: settings.MaxInflightScript,
+			TTS:    settings.MaxInflightTTS,
+			Render: settings.MaxInflightRender,
+		},
 		DB:    m.db,
 		Store: storage.NewLocalFS(m.assetRoot),
 		LLM:   llmClient,

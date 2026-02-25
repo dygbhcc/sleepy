@@ -45,6 +45,15 @@ type Deps struct {
 	Render    render.RenderConfig
 	FixEngine *FixEngine // nil = legacy Decide() path
 	RequireVoiceApproval bool // true = gate TTS behind manual approval (SAFE default)
+	InflightLimits InflightLimits // per-stage concurrency caps (0 = unlimited)
+}
+
+// InflightLimits caps how many runs can be actively processed per stage.
+// A zero value means unlimited.
+type InflightLimits struct {
+	Script int // max locked runs in PENDING (script generation)
+	TTS    int // max locked runs in SCRIPTED (TTS synthesis)
+	Render int // max locked runs in THUMBNAILED (video render)
 }
 
 // RunWorker is a global worker loop that claims the next eligible run,
@@ -70,7 +79,8 @@ func RunWorker(ctx context.Context, deps Deps, pollInterval time.Duration, oneSh
 		}
 
 		// Claim the next eligible run (atomic, skip-locked).
-		run, err := deps.DB.ClaimNextRun(ctx, workerID, deps.RequireVoiceApproval)
+		run, err := deps.DB.ClaimNextRun(ctx, workerID, deps.RequireVoiceApproval,
+			deps.InflightLimits.Script, deps.InflightLimits.TTS, deps.InflightLimits.Render)
 		if err != nil {
 			log.Printf("worker[%s]: claim error: %v", workerID, err)
 			sleep(ctx, pollInterval)
