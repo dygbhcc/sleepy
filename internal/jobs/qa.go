@@ -127,33 +127,91 @@ func qaScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QA
 	}
 
 	// Banned phrases check (from policy) — word-boundary aware.
+	// Stop after first 3 matches to keep reports concise.
+	const maxBannedHits = 3
+	bannedHits := 0
 	lowerText := strings.ToLower(text)
 	lowerWords := strings.Fields(lowerText)
 	for _, phrase := range policy.BannedPhrases {
+		if bannedHits >= maxBannedHits {
+			break
+		}
 		lp := strings.ToLower(phrase)
+		matchType := "word"
 		found := false
+		firstIdx := -1
+		count := 0
+
 		if strings.Contains(lp, " ") {
-			// Multi-word phrase: substring match is fine.
-			found = strings.Contains(lowerText, lp)
+			matchType = "substring"
+			idx := 0
+			tmp := lowerText
+			for {
+				i := strings.Index(tmp, lp)
+				if i < 0 {
+					break
+				}
+				if count == 0 {
+					firstIdx = idx + i
+				}
+				count++
+				idx += i + len(lp)
+				tmp = tmp[i+len(lp):]
+			}
+			found = count > 0
 		} else {
-			// Single word: match whole words only to avoid
-			// false positives like "war" in "warm"/"toward".
-			for _, w := range lowerWords {
-				// Strip common trailing punctuation.
+			for i, w := range lowerWords {
 				w = strings.TrimRight(w, ".,;:!?\"')")
 				w = strings.TrimLeft(w, "\"'(")
 				if w == lp {
+					if count == 0 {
+						firstIdx = i
+					}
+					count++
 					found = true
-					break
 				}
 			}
 		}
 		if found {
+			bannedHits++
 			report.Pass = false
 			report.FailType = FailBannedPhrase
+
+			// Build snippet (~160 chars) around first match.
+			snippet := ""
+			if matchType == "substring" && firstIdx >= 0 {
+				start := firstIdx - 80
+				if start < 0 {
+					start = 0
+				}
+				end := firstIdx + len(lp) + 80
+				if end > len(lowerText) {
+					end = len(lowerText)
+				}
+				snippet = text[start:end]
+			} else if firstIdx >= 0 && firstIdx < len(words) {
+				// Word index — show surrounding words.
+				wStart := firstIdx - 8
+				if wStart < 0 {
+					wStart = 0
+				}
+				wEnd := firstIdx + 9
+				if wEnd > len(words) {
+					wEnd = len(words)
+				}
+				snippet = strings.Join(words[wStart:wEnd], " ")
+			}
+
 			report.Checks = append(report.Checks, QACheck{
 				Name: "banned_phrase", Pass: false,
-				Details: fmt.Sprintf("script contains banned phrase: %q", phrase),
+				Details: fmt.Sprintf("script contains banned phrase: %q (×%d)", phrase, count),
+				Diag: map[string]any{
+					"phrase":      phrase,
+					"match_type":  matchType,
+					"count":       count,
+					"first_index": firstIdx,
+					"snippet":     snippet,
+				},
 			})
 		}
 	}
@@ -167,7 +225,10 @@ func qaScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QA
 			if strings.Contains(f, "high-tension") {
 				ft = FailBannedPhrase
 			}
-			report.FailType = ft
+			// Don't overwrite a more specific FailType already set.
+			if report.FailType == "" || report.FailType == FailNone {
+				report.FailType = ft
+			}
 			report.Checks = append(report.Checks, QACheck{Name: "sleep_safety", Pass: false, Details: f})
 		}
 	} else {
