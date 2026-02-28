@@ -1,0 +1,181 @@
+diff --git a/sleepy/internal/jobs/steps_script.go b/sleepy/internal/jobs/steps_script.go
+--- a/sleepy/internal/jobs/steps_script.go
++++ b/sleepy/internal/jobs/steps_script.go
+@@ -1,30 +1,31 @@
+ package jobs
+
+ import (
+ 	"context"
+ 	"log"
+ 	"strings"
+
+ 	"sleepy/internal/domain"
+ 	"sleepy/internal/providers/llm"
+ )
+
+ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) error {
+ 	log.Printf("step_script: generating for run %s (%s / %s / %s / %dmin, target_words=%d)",
+ 		run.ID, run.Series, run.Episode, run.Style, run.DurationMin, policy.TargetWords)
+
+ 	result, err := deps.LLM.GenerateScript(ctx, llm.ScriptRequest{
+ 		Series:           run.Series,
+ 		Episode:          run.Episode,
+ 		Style:            run.Style,
+ 		Language:         run.Language,
+ 		DurationMin:      run.DurationMin,
+ 		TargetWords:      policy.TargetWords,
+ 		Temperature:      policy.LLMTemperature,
+ 		ExtraInstruction: policy.LLMExtraInstruction,
++		BannedPhrases:    policy.BannedPhrases,
+ 	})
+ 	if err != nil {
+ 		return err
+ 	}
+
+ 	mdPath, err := deps.Store.WriteBytes(run.ID, "script.md", []byte(result.Markdown))
+ 	if err != nil {
+ 		return err
+ 	}
+ 	if err := deps.DB.InsertAsset(ctx, run.ID, domain.AssetScriptMD, mdPath); err != nil {
+ 		return err
+ 	}
+
+ 	ssmlPath, err := deps.Store.WriteBytes(run.ID, "script.ssml", []byte(result.SSML))
+ 	if err != nil {
+ 		return err
+ 	}
+ 	if err := deps.DB.InsertAsset(ctx, run.ID, domain.AssetScriptSSML, ssmlPath); err != nil {
+ 		return err
+ 	}
+
+ 	// Compute and store script hash for idempotency.
+ 	hash, err := computeFileHash(mdPath)
+ 	if err == nil {
+ 		_ = deps.DB.UpdateRunHash(ctx, run.ID, "script_hash", hash)
+ 	}
+
+ 	log.Printf("step_script: done (%d words)", len(strings.Fields(result.Markdown)))
+ 	return nil
+ }
+diff --git a/sleepy/internal/providers/llm/llm.go b/sleepy/internal/providers/llm/llm.go
+--- a/sleepy/internal/providers/llm/llm.go
++++ b/sleepy/internal/providers/llm/llm.go
+@@ -1,18 +1,19 @@
+ package llm
+
+ import (
+ 	"bytes"
+ 	"context"
+ 	"encoding/json"
+ 	"fmt"
+ 	"io"
+ 	"log"
+ 	"net/http"
++	"sort"
+ 	"strings"
+ 	"text/template"
+ 	"time"
+
+ 	"sleepy/internal/errs"
+ )
+
+ // Config holds OpenAI-compatible API settings.
+ type Config struct {
+ 	BaseURL string // e.g. https://api.openai.com/v1
+ 	APIKey  string
+ 	Model   string // e.g. gpt-4o
+ }
+
+ // ScriptRequest describes what script to generate.
+ type ScriptRequest struct {
+ 	Series      string
+ 	Episode     string
+ 	Style       string // Cosmos | Earthside | Myth
+ 	Language    string // en, tr, pt, es, it
+ 	DurationMin int
+
+ 	// Override fields (set by fix engine; zero values = use defaults).
+ 	TargetWords      int     // explicit word target; 0 = derive from DurationMin
+ 	Temperature      float64 // 0 = use default (0.7)
+ 	ExtraInstruction string  // appended to system prompt
++
++	// Policy-driven banned phrases (from pipeline QA). Optional.
++	BannedPhrases []string
+ }
+
+ // ScriptResult contains the generated script in two formats.
+ type ScriptResult struct {
+ 	Markdown string
+ 	SSML     string
+ }
+@@ -178,6 +179,10 @@
+ - Begin gently and let the imagery soften further as the script continues
+ - End with a passage that fades into silence and stillness
+
++{{if .BannedPhrases}}
++Additional forbidden phrases (exact matches, not exhaustive):
++{{.BannedPhrases}}
++{{end}}
++
+ Output format:
+ First, output the full script in plain Markdown.
+ Then output a line containing exactly: ---SSML---
+ Then output the same script wrapped in SSML with <break time="1s"/> tags between paragraphs. Wrap the entire SSML section in <speak> tags.`))
+@@ -205,6 +210,49 @@
+ 	if !ok {
+ 		langName = "English"
+ 	}
++
++	// Prepare policy-driven banned phrases block for the prompt.
++	// Keep it short to avoid bloating tokens.
++	bannedBlock := ""
++	if len(req.BannedPhrases) > 0 {
++		uniq := make(map[string]struct{}, len(req.BannedPhrases))
++		out := make([]string, 0, len(req.BannedPhrases))
++		for _, p := range req.BannedPhrases {
++			p = strings.TrimSpace(p)
++			if p == "" {
++				continue
++			}
++			lp := strings.ToLower(p)
++			if _, exists := uniq[lp]; exists {
++				continue
++			}
++			uniq[lp] = struct{}{}
++			out = append(out, p)
++		}
++		sort.Strings(out)
++		if len(out) > 30 {
++			out = out[:30]
++		}
++		var b strings.Builder
++		for _, p := range out {
++			b.WriteString("- ")
++			b.WriteString(p)
++			b.WriteString("\n")
++		}
++		bannedBlock = strings.TrimRight(b.String(), "\n")
++	}
+
+ 	data := struct {
+ 		Series, Episode, Style, StyleGuide, LangName string
++		BannedPhrases                                string
+ 		DurationMin, WordCount                       int
+-	}{req.Series, req.Episode, req.Style, guide, langName, req.DurationMin, wordCount}
++	}{
++		Series:       req.Series,
++		Episode:      req.Episode,
++		Style:        req.Style,
++		StyleGuide:   guide,
++		LangName:     langName,
++		BannedPhrases: bannedBlock,
++		DurationMin:  req.DurationMin,
++		WordCount:    wordCount,
++	}
+
+ 	var buf bytes.Buffer
+ 	if err := userTmpl.Execute(&buf, data); err != nil {
+ 		return "", err
+ 	}
+ 	return buf.String(), nil
+ }
