@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
@@ -332,14 +334,56 @@ func handleUpdateScript(w http.ResponseWriter, r *http.Request) {
 
 	asset, err := store.GetAsset(r.Context(), id, domain.AssetScriptMD)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "script not found")
+		// Asset doesn't exist yet — create it (manual script for a PENDING/NEEDS_REVIEW run).
+		runDir := filepath.Join(assetRoot, id)
+		if err := os.MkdirAll(runDir, 0755); err != nil {
+			writeErr(w, http.StatusInternalServerError, "cannot create run directory")
+			return
+		}
+		mdPath := filepath.Join(runDir, "script.md")
+		if err := os.WriteFile(mdPath, []byte(req.Content), 0644); err != nil {
+			writeErr(w, http.StatusInternalServerError, "cannot write script file")
+			return
+		}
+		if err := store.InsertAsset(r.Context(), id, domain.AssetScriptMD, mdPath); err != nil {
+			writeErr(w, http.StatusInternalServerError, "cannot record script asset")
+			return
+		}
+
+		// Create basic SSML wrapper for TTS.
+		ssmlContent := "<speak>\n" + req.Content + "\n</speak>"
+		ssmlPath := filepath.Join(runDir, "script.ssml")
+		if err := os.WriteFile(ssmlPath, []byte(ssmlContent), 0644); err != nil {
+			log.Printf("handleUpdateScript: failed to write SSML: %v", err)
+		} else {
+			_ = store.InsertAsset(r.Context(), id, domain.AssetScriptSSML, ssmlPath)
+		}
+
+		// Update script hash.
+		h := sha256.Sum256([]byte(req.Content))
+		_ = store.UpdateRunHash(r.Context(), id, "script_hash", hex.EncodeToString(h[:6]))
+
+		asset, _ = store.GetAsset(r.Context(), id, domain.AssetScriptMD)
+		writeJSON(w, http.StatusOK, asset)
 		return
 	}
 
+	// Asset exists — update in place.
 	if err := os.WriteFile(asset.Path, []byte(req.Content), 0644); err != nil {
 		writeErr(w, http.StatusInternalServerError, "cannot write script file")
 		return
 	}
+
+	// Also update SSML.
+	ssmlAsset, ssmlErr := store.GetAsset(r.Context(), id, domain.AssetScriptSSML)
+	if ssmlErr == nil {
+		ssmlContent := "<speak>\n" + req.Content + "\n</speak>"
+		_ = os.WriteFile(ssmlAsset.Path, []byte(ssmlContent), 0644)
+	}
+
+	// Update script hash so pipeline recognizes the change.
+	h := sha256.Sum256([]byte(req.Content))
+	_ = store.UpdateRunHash(r.Context(), id, "script_hash", hex.EncodeToString(h[:6]))
 
 	writeJSON(w, http.StatusOK, asset)
 }
@@ -454,8 +498,8 @@ func handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required API keys
-	if s.Mode == "test" && s.OpenAIAPIKey == "" {
-		writeErr(w, http.StatusBadRequest, "OpenAI API key is required for test mode")
+	if s.Mode == "test" && s.GroqAPIKey == "" {
+		writeErr(w, http.StatusBadRequest, "Groq API key is required for test mode")
 		return
 	}
 	if s.Mode == "prod" {

@@ -286,15 +286,11 @@ tr:hover{background:var(--surface2);cursor:pointer}
 
       <!-- Test mode fields -->
       <div id="testFields" class="settings-section">
-        <h3>OpenAI + Edge TTS</h3>
+        <h3>Groq + Edge TTS</h3>
         <div class="settings-grid">
           <div class="form-group settings-full">
-            <label>OpenAI API Key</label>
-            <input type="password" id="sTestOpenAIKey" placeholder="sk-...">
-          </div>
-          <div class="form-group">
-            <label>Model</label>
-            <input type="text" id="sTestOpenAIModel" placeholder="gpt-4o-mini">
+            <label>Groq API Key</label>
+            <input type="password" id="sGroqKey" placeholder="gsk_...">
           </div>
           <div class="form-group">
             <label data-i18n="edgeVoice"></label>
@@ -439,7 +435,7 @@ const LANGS = {
     settings: 'Settings',
     settingsTitle: 'Worker Settings',
     modeLabel: 'Mode',
-    modeTest: 'Test (OpenAI + Edge TTS)',
+    modeTest: 'Test (Groq + Edge TTS)',
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Edge Voice',
     edgeRate: 'Edge Rate',
@@ -515,7 +511,7 @@ const LANGS = {
     settings: 'Ayarlar',
     settingsTitle: 'Worker Ayarlari',
     modeLabel: 'Mod',
-    modeTest: 'Test (OpenAI + Edge TTS)',
+    modeTest: 'Test (Groq + Edge TTS)',
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Edge Ses',
     edgeRate: 'Edge Hiz',
@@ -743,7 +739,7 @@ const LANGS = {
     settings: 'Impostazioni',
     settingsTitle: 'Impostazioni Worker',
     modeLabel: 'Modalita',
-    modeTest: 'Test (OpenAI + Edge TTS)',
+    modeTest: 'Test (Groq + Edge TTS)',
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Voce Edge',
     edgeRate: 'Velocita Edge',
@@ -907,7 +903,7 @@ function renderPipelineProgress(run){
   const isFailed=run.Status==='FAILED';
   const isReview=run.Status==='NEEDS_REVIEW';
   const isDone=run.Status==='DONE';
-  const isWaiting=run.Status==='SCRIPTED' && !run.VoiceApproved;
+  const isWaiting=false; // voice approval removed — full automation
   const curIdx=PIPELINE.indexOf(run.Status);
 
   let pips='';
@@ -1067,17 +1063,7 @@ function renderDetail(data){
     <div class="detail-item"><div class="label">${t('createdAt')}</div><div class="value">${fmtDate(run.CreatedAt)}</div></div>
   </div>`;
 
-  // Voice approval banner
   let approvalHTML='';
-  if(run.Status==='SCRIPTED' && !run.VoiceApproved){
-    approvalHTML=`<div style="background:#eab30815;border:1px solid var(--yellow);border-radius:8px;padding:16px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:16px">
-      <div>
-        <div style="font-weight:600;color:var(--yellow);margin-bottom:4px">${t('awaitingApproval')}</div>
-        <div style="font-size:13px;color:var(--text2)">${t('approveVoiceDesc')}</div>
-      </div>
-      <button class="btn btn-success" onclick="approveVoice('${run.ID}')" style="white-space:nowrap;padding:10px 24px;font-size:15px">${t('approveVoice')}</button>
-    </div>`;
-  }
 
   // Error box
   let errorHTML='';
@@ -1125,14 +1111,19 @@ function renderDetail(data){
 
   // Script section
   const scriptAsset=assets.find(a=>a.Kind==='script_md');
+  const canEditScript=scriptAsset||(run.Status==='NEEDS_REVIEW'||run.Status==='FAILED');
   let scriptHTML='';
-  if(scriptAsset){
-    scriptHTML=`<div class="section"><h3>Script</h3>
-      <div id="scriptLoading" style="color:var(--text2)">${t('scriptLoading')}</div>
-      <textarea class="script-area" id="scriptEditor" style="display:none"></textarea>
-      <div class="script-actions" id="scriptActions" style="display:none">
+  if(canEditScript){
+    const isNew=!scriptAsset;
+    const continueBtn=(run.Status==='NEEDS_REVIEW'||run.Status==='FAILED')?
+      `<button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="saveAndContinue('${run.ID}')">Save &amp; Continue</button>`:'';
+    scriptHTML=`<div class="section"><h3>Script${isNew?' (manual)':''}</h3>
+      <div id="scriptLoading" style="color:var(--text2)">${isNew?'':t('scriptLoading')}</div>
+      <textarea class="script-area" id="scriptEditor" style="display:${isNew?'block':'none'}" placeholder="Write your script here..."></textarea>
+      <div class="script-actions" id="scriptActions" style="display:${isNew?'flex':'none'}">
         <button class="btn btn-primary btn-sm" onclick="saveScript('${run.ID}')">${t('save')}</button>
-        <button class="btn btn-sm" style="background:var(--surface2);color:var(--text)" onclick="loadScript('${run.ID}')">${t('reset')}</button>
+        ${continueBtn}
+        ${isNew?'':`<button class="btn btn-sm" style="background:var(--surface2);color:var(--text)" onclick="loadScript('${run.ID}')">${t('reset')}</button>`}
       </div>
     </div>`;
   }
@@ -1210,6 +1201,25 @@ async function saveScript(runID){
   }catch(e){toast(t('scriptSaveError')+': '+e.message,'error')}
 }
 
+async function saveAndContinue(runID){
+  const content=document.getElementById('scriptEditor').value;
+  if(!content.trim()){toast('Script cannot be empty','error');return}
+  try{
+    const res=await fetch(API+'/api/runs/'+runID+'/script',{
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({content})
+    });
+    if(!res.ok)throw new Error((await res.json()).error);
+    // Now trigger retry to resume pipeline
+    const r2=await fetch(API+'/api/runs/'+runID+'/retry',{method:'POST'});
+    if(!r2.ok)throw new Error((await r2.json()).error);
+    toast('Script saved, pipeline resumed');
+    closeModal();
+    loadRuns();
+  }catch(e){toast('Error: '+e.message,'error')}
+}
+
 // ==================== Thumbnail upload ====================
 async function uploadThumbnail(runID,file){
   if(!file)return;
@@ -1281,8 +1291,7 @@ async function loadSettings(){
     const res=await fetch(API+'/api/settings');
     const s=await res.json();
     setSettingsMode(s.mode||'test');
-    document.getElementById('sTestOpenAIKey').value=s.openai_api_key||'';
-    document.getElementById('sTestOpenAIModel').value=s.openai_model||'';
+    document.getElementById('sGroqKey').value=s.groq_api_key||'';
     document.getElementById('sOpenAIKey').value=s.openai_api_key||'';
     document.getElementById('sOpenAIBaseURL').value=s.openai_base_url||'';
     document.getElementById('sOpenAIModel').value=s.openai_model||'';
@@ -1299,12 +1308,12 @@ async function loadSettings(){
 }
 
 async function saveSettings(){
-  const isTest=settingsMode==='test';
   const body={
     mode:settingsMode,
-    openai_api_key:isTest?document.getElementById('sTestOpenAIKey').value:document.getElementById('sOpenAIKey').value,
-    openai_base_url:isTest?'':document.getElementById('sOpenAIBaseURL').value,
-    openai_model:isTest?document.getElementById('sTestOpenAIModel').value:document.getElementById('sOpenAIModel').value,
+    groq_api_key:document.getElementById('sGroqKey').value,
+    openai_api_key:document.getElementById('sOpenAIKey').value,
+    openai_base_url:document.getElementById('sOpenAIBaseURL').value,
+    openai_model:document.getElementById('sOpenAIModel').value,
     elevenlabs_api_key:document.getElementById('sElevenKey').value,
     elevenlabs_voice_id:document.getElementById('sElevenVoiceID').value,
     elevenlabs_model_id:document.getElementById('sElevenModelID').value,

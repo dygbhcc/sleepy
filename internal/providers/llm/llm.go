@@ -88,23 +88,11 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 	const maxRetries = 2
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			// Back off between retries to avoid rate limits.
-			wait := time.Duration(attempt*20) * time.Second
-			log.Printf("llm: waiting %s before retry %d", wait, attempt+1)
-			select {
-			case <-time.After(wait):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+			log.Printf("llm: QA retry %d/%d", attempt, maxRetries)
 		}
 
-		raw, err := c.chatCompletion(ctx, messages, req.Temperature)
+		raw, err := c.chatCompletionWithRetry(ctx, messages, req.Temperature)
 		if err != nil {
-			// On rate limit (typed TransientError), wait and retry.
-			if errs.IsTransient(err) && attempt < maxRetries {
-				log.Printf("llm: transient error on attempt %d, will retry", attempt+1)
-				continue
-			}
 			return nil, fmt.Errorf("llm call (attempt %d): %w", attempt+1, err)
 		}
 
@@ -134,6 +122,30 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 	}
 
 	return nil, fmt.Errorf("script failed QA gate after %d retries", maxRetries)
+}
+
+// chatCompletionWithRetry wraps chatCompletion with transient-error retries
+// (429, 502, 503, 504) so the caller doesn't have to mix transient retries
+// with QA retries.
+func (c *Client) chatCompletionWithRetry(ctx context.Context, msgs []chatMsg, temperature float64) (string, error) {
+	const maxTransient = 4
+	for i := 0; i < maxTransient; i++ {
+		raw, err := c.chatCompletion(ctx, msgs, temperature)
+		if err == nil {
+			return raw, nil
+		}
+		if !errs.IsTransient(err) || i == maxTransient-1 {
+			return "", err
+		}
+		wait := time.Duration((i+1)*15) * time.Second
+		log.Printf("llm: transient error (attempt %d/%d), retrying in %s: %v", i+1, maxTransient, wait, err)
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	return "", fmt.Errorf("unreachable")
 }
 
 // -------- OpenAI chat completions wire types --------
@@ -195,6 +207,16 @@ func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, temperature
 
 	if resp.StatusCode != http.StatusOK {
 		baseErr := fmt.Errorf("api error (HTTP %d): %s", resp.StatusCode, truncate(string(respBody), 500))
+		// 429 can mean short rate-limit (transient) or quota/billing exhausted (permanent).
+		// Don't retry on quota, billing, or daily token limit errors.
+		if resp.StatusCode == 429 {
+			body := string(respBody)
+			if strings.Contains(body, "insufficient_quota") ||
+				strings.Contains(body, "tokens per day") ||
+				strings.Contains(body, "rate_limit_exceeded") {
+				return "", baseErr // permanent — don't retry
+			}
+		}
 		if resp.StatusCode == 429 || resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504 {
 			return "", errs.NewTransient("openai", resp.StatusCode, baseErr)
 		}

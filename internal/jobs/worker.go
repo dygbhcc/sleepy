@@ -44,7 +44,6 @@ type Deps struct {
 	Image     *image.Client
 	Render    render.RenderConfig
 	FixEngine *FixEngine // nil = legacy Decide() path
-	RequireVoiceApproval bool // true = gate TTS behind manual approval (SAFE default)
 	InflightLimits InflightLimits // per-stage concurrency caps (0 = unlimited)
 }
 
@@ -79,7 +78,7 @@ func RunWorker(ctx context.Context, deps Deps, pollInterval time.Duration, oneSh
 		}
 
 		// Claim the next eligible run (atomic, skip-locked).
-		run, err := deps.DB.ClaimNextRun(ctx, workerID, deps.RequireVoiceApproval,
+		run, err := deps.DB.ClaimNextRun(ctx, workerID,
 			deps.InflightLimits.Script, deps.InflightLimits.TTS, deps.InflightLimits.Render)
 		if err != nil {
 			log.Printf("worker[%s]: claim error: %v", workerID, err)

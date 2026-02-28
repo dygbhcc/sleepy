@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -262,15 +263,9 @@ func (d *DB) ApproveVoice(ctx context.Context, id string) error {
 // ClaimNextRun atomically claims the next eligible run for processing.
 // A run is eligible if it is not in a terminal state and is either unlocked
 // or has an expired lock (older than 5 minutes).
-// If requireVoiceApproval is true, SCRIPTED runs without voice_approved are skipped.
 // Inflight limits exclude statuses where the number of actively-locked runs >= cap.
 // Returns nil, nil if no run is available.
-func (d *DB) ClaimNextRun(ctx context.Context, workerID string, requireVoiceApproval bool, maxScript, maxTTS, maxRender int) (*domain.Run, error) {
-	voiceGate := ""
-	if requireVoiceApproval {
-		voiceGate = "AND NOT (status = 'SCRIPTED' AND voice_approved = false)"
-	}
-
+func (d *DB) ClaimNextRun(ctx context.Context, workerID string, maxScript, maxTTS, maxRender int) (*domain.Run, error) {
 	// Build per-stage inflight exclusions.
 	inflightGate := buildInflightGate(maxScript, maxTTS, maxRender)
 
@@ -281,7 +276,6 @@ func (d *DB) ClaimNextRun(ctx context.Context, workerID string, requireVoiceAppr
 		 WHERE id = (
 		     SELECT id FROM runs
 		     WHERE status NOT IN ('DONE','FAILED','NEEDS_REVIEW')
-		       `+voiceGate+`
 		       `+inflightGate+`
 		       AND (locked_by IS NULL OR locked_at < now() - interval '5 minutes')
 		     ORDER BY created_at ASC
@@ -301,7 +295,7 @@ func (d *DB) ClaimNextRun(ctx context.Context, workerID string, requireVoiceAppr
 // buildInflightGate returns SQL AND clauses that exclude statuses where the
 // number of actively-locked runs has reached the per-stage cap. 0 = unlimited.
 func buildInflightGate(maxScript, maxTTS, maxRender int) string {
-	gate := ""
+	var b strings.Builder
 	// stage → status mapping: script=PENDING, tts=SCRIPTED, render=THUMBNAILED
 	type pair struct {
 		status string
@@ -313,12 +307,12 @@ func buildInflightGate(maxScript, maxTTS, maxRender int) string {
 		{"THUMBNAILED", maxRender},
 	} {
 		if p.limit > 0 {
-			gate += fmt.Sprintf(
+			fmt.Fprintf(&b,
 				`AND NOT (status = '%s' AND (SELECT count(*) FROM runs r2 WHERE r2.status = '%s' AND r2.locked_by IS NOT NULL AND r2.locked_at >= now() - interval '5 minutes') >= %d) `,
 				p.status, p.status, p.limit)
 		}
 	}
-	return gate
+	return b.String()
 }
 
 // ReleaseRun releases the lock on a run after processing one stage.

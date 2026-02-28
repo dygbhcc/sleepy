@@ -84,19 +84,19 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 		})
 
 	default: // "test"
-		log.Println("worker-manager: starting in test mode (OpenAI + Edge TTS)")
+		log.Println("worker-manager: starting in test mode (Groq + Edge TTS)")
 
 		baseURL := settings.OpenAIBaseURL
 		if baseURL == "" {
-			baseURL = "https://api.openai.com/v1"
+			baseURL = "https://api.groq.com/openai/v1"
 		}
 		model := settings.OpenAIModel
 		if model == "" {
-			model = "gpt-4o-mini"
+			model = "llama-3.3-70b-versatile"
 		}
 		llmClient = llm.NewClient(llm.Config{
 			BaseURL: baseURL,
-			APIKey:  settings.OpenAIAPIKey,
+			APIKey:  settings.GroqAPIKey,
 			Model:   model,
 		})
 
@@ -126,7 +126,6 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 	}
 
 	deps := jobs.Deps{
-		RequireVoiceApproval: settings.RequireVoiceApproval,
 		InflightLimits: jobs.InflightLimits{
 			Script: settings.MaxInflightScript,
 			TTS:    settings.MaxInflightTTS,
@@ -154,10 +153,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 	m.cancel = cancel
 	m.running = true
 
-	n := m.Concurrency
-	if n < 1 {
-		n = 1
-	}
+	n := max(m.Concurrency, 1)
 	log.Printf("worker-manager: launching %d worker goroutine(s)", n)
 
 	for i := 0; i < n; i++ {
