@@ -454,8 +454,8 @@ func handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required API keys
-	if s.Mode == "test" && s.GroqAPIKey == "" {
-		writeErr(w, http.StatusBadRequest, "Groq API key is required for test mode")
+	if s.Mode == "test" && s.OpenAIAPIKey == "" {
+		writeErr(w, http.StatusBadRequest, "OpenAI API key is required for test mode")
 		return
 	}
 	if s.Mode == "prod" {

@@ -187,13 +187,8 @@ func voiceFixes() []FixPlan {
 
 func renderFixes() []FixPlan {
 	return []FixPlan{
-		// Duration mismatch: plain retry.
-		{
-			ID: "render_duration_retry", Stage: domain.StatusThumbnailed,
-			FailType: FailDurationMismatch, Action: "retry",
-			TargetStatus: domain.StatusThumbnailed,
-		},
-		// Duration mismatch: loopback to re-voice.
+		// Duration mismatch: loopback to re-voice (plain retry to THUMBNAILED
+		// is a no-op because render skips via input-hash cache).
 		{
 			ID: "render_duration_revoice", Stage: domain.StatusThumbnailed,
 			FailType: FailDurationMismatch, Action: "loopback",

@@ -84,19 +84,19 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 		})
 
 	default: // "test"
-		log.Println("worker-manager: starting in test mode (Groq + Edge TTS)")
+		log.Println("worker-manager: starting in test mode (OpenAI + Edge TTS)")
 
 		baseURL := settings.OpenAIBaseURL
 		if baseURL == "" {
-			baseURL = "https://api.groq.com/openai/v1"
+			baseURL = "https://api.openai.com/v1"
 		}
 		model := settings.OpenAIModel
 		if model == "" {
-			model = "llama-3.3-70b-versatile"
+			model = "gpt-4o-mini"
 		}
 		llmClient = llm.NewClient(llm.Config{
 			BaseURL: baseURL,
-			APIKey:  settings.GroqAPIKey,
+			APIKey:  settings.OpenAIAPIKey,
 			Model:   model,
 		})
 

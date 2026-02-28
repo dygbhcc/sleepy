@@ -270,7 +270,7 @@ Rules:
 - No exclamation marks
 - No ALL CAPS words (except "SSML" in the format separator)
 - No dialogue or characters in conflict
-- No high-tension words: suddenly, blood, scream, terror, panic, kill, dead, gun, fight, attack, explosion
+- NEVER use any of these banned words: suddenly, blood, scream, terror, panic, kill, dead, gun, fight, attack, explosion, horror, nightmare, violent, murder, death, war, battle, weapon, destroy
 - Descriptive, sensory imagery only: sight, gentle sounds, soft textures, warmth
 - Gradual, dreamlike progression with no plot
 - Begin gently and let the imagery soften further as the script continues

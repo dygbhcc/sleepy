@@ -126,10 +126,29 @@ func qaScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QA
 		})
 	}
 
-	// Banned phrases check (from policy).
+	// Banned phrases check (from policy) — word-boundary aware.
 	lowerText := strings.ToLower(text)
+	lowerWords := strings.Fields(lowerText)
 	for _, phrase := range policy.BannedPhrases {
-		if strings.Contains(lowerText, strings.ToLower(phrase)) {
+		lp := strings.ToLower(phrase)
+		found := false
+		if strings.Contains(lp, " ") {
+			// Multi-word phrase: substring match is fine.
+			found = strings.Contains(lowerText, lp)
+		} else {
+			// Single word: match whole words only to avoid
+			// false positives like "war" in "warm"/"toward".
+			for _, w := range lowerWords {
+				// Strip common trailing punctuation.
+				w = strings.TrimRight(w, ".,;:!?\"')")
+				w = strings.TrimLeft(w, "\"'(")
+				if w == lp {
+					found = true
+					break
+				}
+			}
+		}
+		if found {
 			report.Pass = false
 			report.FailType = FailBannedPhrase
 			report.Checks = append(report.Checks, QACheck{
@@ -399,7 +418,20 @@ func Decide(stage domain.RunStatus, report QAReport, run *domain.Run, policy Pol
 		}
 		return Decision{Action: "needs_review", Reason: fmt.Sprintf("voice QA failed (%s) after %d attempts", report.FailType, run.VoiceAttempt)}
 
-	case FailRenderFail, FailDurationMismatch:
+	case FailDurationMismatch:
+		// Duration mismatch means audio/video are out of sync. Re-rendering with
+		// the same audio won't help (render skips via hash cache), so retry from
+		// VOICED to regenerate audio.
+		if run.VoiceAttempt < policy.MaxVoiceAttempt {
+			return Decision{
+				Action:       "retry",
+				TargetStatus: domain.StatusScripted,
+				Reason:       fmt.Sprintf("duration mismatch, regenerating audio (attempt %d/%d)", run.VoiceAttempt, policy.MaxVoiceAttempt),
+			}
+		}
+		return Decision{Action: "needs_review", Reason: fmt.Sprintf("duration mismatch after %d voice attempts", run.VoiceAttempt)}
+
+	case FailRenderFail:
 		if run.RenderAttempt < policy.MaxRenderAttempt {
 			return Decision{
 				Action:       "retry",

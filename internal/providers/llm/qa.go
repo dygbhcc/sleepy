@@ -95,8 +95,8 @@ func RunQA(text string) QAResult {
 			unique[strings.Trim(w, ".,;:!?\"'()-[]{}/*#")] = struct{}{}
 		}
 		ratio := float64(len(unique)) / float64(len(words))
-		if ratio < 0.20 {
-			failures = append(failures, fmt.Sprintf("high repetition: %.2f unique/total ratio (min 0.20)", ratio))
+		if ratio < 0.30 {
+			failures = append(failures, fmt.Sprintf("high repetition: %.2f unique/total ratio (min 0.30)", ratio))
 		}
 	}
 

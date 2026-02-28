@@ -104,9 +104,9 @@ func isStageExhausted(stage domain.RunStatus, ft FailType, run *domain.Run, poli
 	switch {
 	case ft == FailBannedPhrase || ft == FailWordcountLow || ft == FailWordcountHigh || ft == FailPacingFail:
 		return run.ScriptAttempt >= policy.MaxScriptAttempt
-	case ft == FailAudioDurationOff || ft == FailAudioClipping:
+	case ft == FailAudioDurationOff || ft == FailAudioClipping || ft == FailDurationMismatch:
 		return run.VoiceAttempt >= policy.MaxVoiceAttempt
-	case ft == FailRenderFail || ft == FailDurationMismatch:
+	case ft == FailRenderFail:
 		return run.RenderAttempt >= policy.MaxRenderAttempt
 	case ft == FailMetadataInvalid:
 		return run.PackageAttempt >= policy.MaxPackageAttempt
