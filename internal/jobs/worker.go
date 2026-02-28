@@ -39,7 +39,7 @@ type ElevenLabsOverridable interface {
 type Deps struct {
 	DB        *db.DB
 	Store     storage.Store
-	LLM       *llm.Client
+	LLM       llm.ScriptGenerator
 	TTS       TTSSynthesizer
 	Image     *image.Client
 	Render    render.RenderConfig

@@ -45,26 +45,75 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 	ffmpegBin := "ffmpeg"
 	ffprobeBin := "ffprobe"
 
-	var llmClient *llm.Client
+	var llmRouter llm.ScriptGenerator
 	var ttsProvider jobs.TTSSynthesizer
 
-	switch settings.Mode {
-	case "prod":
-		log.Println("worker-manager: starting in prod mode (OpenAI + ElevenLabs)")
+	// Build LLM provider list with fallback order.
+	var llmProviders []llm.NamedProvider
 
+	// Groq provider (if key is set).
+	if settings.GroqAPIKey != "" {
+		baseURL := "https://api.groq.com/openai/v1"
+		model := "llama-3.3-70b-versatile"
+		if settings.Mode == "test" {
+			if settings.OpenAIBaseURL != "" {
+				baseURL = settings.OpenAIBaseURL
+			}
+			if settings.OpenAIModel != "" {
+				model = settings.OpenAIModel
+			}
+		}
+		llmProviders = append(llmProviders, llm.NamedProvider{
+			Name:   "groq",
+			Client: llm.NewClient(llm.Config{BaseURL: baseURL, APIKey: settings.GroqAPIKey, Model: model}),
+		})
+	}
+
+	// OpenAI provider (if key is set).
+	if settings.OpenAIAPIKey != "" {
 		baseURL := settings.OpenAIBaseURL
 		if baseURL == "" {
 			baseURL = "https://api.openai.com/v1"
 		}
 		model := settings.OpenAIModel
 		if model == "" {
-			model = "gpt-4o"
+			if settings.Mode == "prod" {
+				model = "gpt-4o"
+			} else {
+				model = "gpt-4o-mini"
+			}
 		}
-		llmClient = llm.NewClient(llm.Config{
-			BaseURL: baseURL,
-			APIKey:  settings.OpenAIAPIKey,
-			Model:   model,
+		llmProviders = append(llmProviders, llm.NamedProvider{
+			Name:   "openai",
+			Client: llm.NewClient(llm.Config{BaseURL: baseURL, APIKey: settings.OpenAIAPIKey, Model: model}),
 		})
+	}
+
+	// In prod mode, prefer OpenAI first.
+	if settings.Mode == "prod" && len(llmProviders) >= 2 {
+		// Swap so OpenAI is first.
+		for i, p := range llmProviders {
+			if p.Name == "openai" && i > 0 {
+				llmProviders[0], llmProviders[i] = llmProviders[i], llmProviders[0]
+				break
+			}
+		}
+	}
+
+	if len(llmProviders) == 0 {
+		return fmt.Errorf("no LLM API keys configured")
+	}
+
+	names := make([]string, len(llmProviders))
+	for i, p := range llmProviders {
+		names[i] = p.Name
+	}
+	log.Printf("worker-manager: LLM fallback order: %v", names)
+	llmRouter = llm.NewRouter(llmProviders)
+
+	switch settings.Mode {
+	case "prod":
+		log.Println("worker-manager: starting in prod mode (ElevenLabs TTS)")
 
 		speed := settings.ElevenLabsSpeed
 		if speed <= 0 {
@@ -84,21 +133,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 		})
 
 	default: // "test"
-		log.Println("worker-manager: starting in test mode (Groq + Edge TTS)")
-
-		baseURL := settings.OpenAIBaseURL
-		if baseURL == "" {
-			baseURL = "https://api.groq.com/openai/v1"
-		}
-		model := settings.OpenAIModel
-		if model == "" {
-			model = "llama-3.3-70b-versatile"
-		}
-		llmClient = llm.NewClient(llm.Config{
-			BaseURL: baseURL,
-			APIKey:  settings.GroqAPIKey,
-			Model:   model,
-		})
+		log.Println("worker-manager: starting in test mode (Edge TTS)")
 
 		voice := settings.EdgeVoice
 		if voice == "" {
@@ -133,7 +168,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 		},
 		DB:    m.db,
 		Store: storage.NewLocalFS(m.assetRoot),
-		LLM:   llmClient,
+		LLM:   llmRouter,
 		TTS:   ttsProvider,
 		Image: image.NewClient(image.Config{
 			FFmpegBin:      ffmpegBin,
