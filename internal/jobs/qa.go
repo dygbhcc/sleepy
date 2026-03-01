@@ -35,6 +35,7 @@ const (
 	FailMissingFile      FailType = "MISSING_FILE"
 	FailMetadataInvalid  FailType = "METADATA_INVALID"
 	FailRateLimited      FailType = "RATE_LIMITED"
+	FailTitleInvalid     FailType = "TITLE_INVALID"
 	FailUnknown          FailType = "UNKNOWN"
 )
 
@@ -233,6 +234,62 @@ func qaScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QA
 		}
 	} else {
 		report.Checks = append(report.Checks, QACheck{Name: "sleep_safety", Pass: true, Details: "all checks passed"})
+	}
+
+	// Title QA: check that AI-generated title is valid.
+	// Re-read run to get the latest title (set during stepScript).
+	freshRun, runErr := deps.DB.GetRun(ctx, run.ID)
+	if runErr != nil {
+		log.Printf("qa_script: could not re-read run for title check: %v", runErr)
+	} else {
+		title := strings.TrimSpace(freshRun.Title)
+		titleLen := len([]rune(title))
+		titleDiag := map[string]any{"title": title, "length": titleLen}
+
+		titlePass := true
+		titleDetails := ""
+
+		switch {
+		case title == "":
+			titlePass = false
+			titleDetails = "title is empty"
+		case titleLen < 10:
+			titlePass = false
+			titleDetails = fmt.Sprintf("title too short (%d chars, min 10)", titleLen)
+		case titleLen > 80:
+			titlePass = false
+			titleDetails = fmt.Sprintf("title too long (%d chars, max 80)", titleLen)
+		case title == strings.ToUpper(title) && titleLen > 5:
+			titlePass = false
+			titleDetails = "title is ALL CAPS"
+		}
+
+		// Check banned phrases in title.
+		if titlePass {
+			lowerTitle := strings.ToLower(title)
+			for _, phrase := range policy.BannedPhrases {
+				if strings.Contains(lowerTitle, strings.ToLower(phrase)) {
+					titlePass = false
+					titleDetails = fmt.Sprintf("title contains banned phrase: %q", phrase)
+					titleDiag["banned_phrase"] = phrase
+					break
+				}
+			}
+		}
+
+		if titlePass {
+			titleDetails = fmt.Sprintf("title OK (%d chars): %q", titleLen, title)
+		}
+
+		report.Checks = append(report.Checks, QACheck{
+			Name: "title", Pass: titlePass, Details: titleDetails, Diag: titleDiag,
+		})
+		if !titlePass {
+			report.Pass = false
+			if report.FailType == "" || report.FailType == FailNone {
+				report.FailType = FailTitleInvalid
+			}
+		}
 	}
 
 	return report

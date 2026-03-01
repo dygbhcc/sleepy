@@ -1092,7 +1092,7 @@ function renderDetail(data){
   const run=data.run;
   const assets=data.assets||[];
 
-  document.getElementById('modalTitle').textContent=run.Series+' - '+run.Episode;
+  document.getElementById('modalTitle').textContent=run.Title||run.Series+' - '+run.Episode;
 
   // Progress bar
   let progressHTML='<div class="progress-bar">';
@@ -1113,6 +1113,7 @@ function renderDetail(data){
     <div class="detail-item"><div class="label">${t('style')}</div><div class="value">${esc(run.Style)}</div></div>
     <div class="detail-item"><div class="label">${t('language')}</div><div class="value">${langDisplay(run.Language)}</div></div>
     <div class="detail-item"><div class="label">${t('duration')}</div><div class="value">${run.DurationMin} ${t('minuteLong')}</div></div>
+    ${run.Title?`<div class="detail-item"><div class="label">Title</div><div class="value">${esc(run.Title)}</div></div>`:''}
     <div class="detail-item"><div class="label">${t('status')}</div><div class="value"><span class="badge ${statusClass(run.Status)}">${run.Status}</span></div></div>
     <div class="detail-item"><div class="label">${t('createdAt')}</div><div class="value">${fmtDate(run.CreatedAt)}</div></div>
   </div>`;

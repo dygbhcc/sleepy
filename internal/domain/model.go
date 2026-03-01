@@ -34,6 +34,9 @@ type Run struct {
 	// Voice approval gate
 	VoiceApproved bool
 
+	// Dynamic title (AI-generated)
+	Title string
+
 	// YouTube upload
 	YouTubeVideoID string
 

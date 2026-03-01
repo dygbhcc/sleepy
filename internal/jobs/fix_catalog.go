@@ -134,6 +134,15 @@ func scriptFixes() []FixPlan {
 				"llm_extra_instruction": "CRITICAL: The previous script had repetitive patterns. Every paragraph MUST use completely different imagery. No two paragraphs should describe similar scenes. Vary sentence length and structure throughout. Keep the calm, sleepy tone but maximize variety.",
 			},
 		},
+		// TITLE_INVALID: regenerate script + title.
+		{
+			ID: "script_title_retry", Stage: domain.StatusPending,
+			FailType: FailTitleInvalid, Action: "retry",
+			TargetStatus: domain.StatusPending,
+			Overrides: map[string]any{
+				"llm_temperature": 0.6,
+			},
+		},
 	}
 }
 

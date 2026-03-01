@@ -18,6 +18,17 @@ import (
 // ScriptGenerator is the interface consumed by the pipeline.
 type ScriptGenerator interface {
 	GenerateScript(ctx context.Context, req ScriptRequest) (*ScriptResult, error)
+	GenerateTitle(ctx context.Context, req TitleRequest) (string, error)
+}
+
+// TitleRequest describes what title to generate.
+type TitleRequest struct {
+	ScriptExcerpt string // first ~500 words of the script
+	Series        string
+	Episode       string
+	Style         string
+	Language      string
+	DurationMin   int
 }
 
 // Config holds OpenAI-compatible API settings.
@@ -108,6 +119,48 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 	}
 
 	return parseScriptResponse(raw)
+}
+
+// GenerateTitle calls the LLM to produce a short, calm video title based on script content.
+func (c *Client) GenerateTitle(ctx context.Context, req TitleRequest) (string, error) {
+	lang := req.Language
+	if lang == "" {
+		lang = "en"
+	}
+	langName, ok := langNames[lang]
+	if !ok {
+		langName = "English"
+	}
+
+	sysPrompt := fmt.Sprintf(`You are a YouTube title writer for sleep/relaxation videos.
+Write exactly ONE short video title. Rules:
+- Maximum 60 characters
+- Language: %s
+- Calm, gentle, inviting tone
+- SEO-friendly (include "sleep" or equivalent in the language)
+- No clickbait, no ALL CAPS, no exclamation marks
+- No quotes around the title
+- Return ONLY the title text, nothing else`, langName)
+
+	userPrompt := fmt.Sprintf("Series: %s\nEpisode: %s\nStyle: %s\nDuration: %d minutes\n\nScript excerpt:\n%s",
+		req.Series, req.Episode, req.Style, req.DurationMin, req.ScriptExcerpt)
+
+	messages := []chatMsg{
+		{Role: "system", Content: sysPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+
+	raw, err := c.chatCompletionWithRetry(ctx, messages, 0.7, 100)
+	if err != nil {
+		return "", fmt.Errorf("generate title: %w", err)
+	}
+
+	// Clean up: remove quotes, trim whitespace.
+	title := strings.TrimSpace(raw)
+	title = strings.Trim(title, "\"'\u201c\u201d\u2018\u2019")
+	title = strings.TrimSpace(title)
+
+	return title, nil
 }
 
 // chatCompletionWithRetry wraps chatCompletion with transient-error retries

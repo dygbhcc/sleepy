@@ -40,7 +40,10 @@ func stepYouTube(ctx context.Context, deps Deps, run *domain.Run) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
-	title := fmt.Sprintf("%s - %s", run.Series, run.Episode)
+	title := run.Title
+	if title == "" {
+		title = fmt.Sprintf("%s - %s", run.Series, run.Episode)
+	}
 	desc := fmt.Sprintf("A gentle sleep narration.\n\nSeries: %s\nEpisode: %s\nStyle: %s",
 		run.Series, run.Episode, run.Style)
 	tags := []string{"sleep", "narration", "relaxation", run.Style, run.Series}

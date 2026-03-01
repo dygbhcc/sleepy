@@ -803,7 +803,10 @@ func handleUploadYouTube(w http.ResponseWriter, r *http.Request) {
 		privacy = s.YouTubePrivacy
 	}
 
-	title := fmt.Sprintf("%s - %s", run.Series, run.Episode)
+	title := run.Title
+	if title == "" {
+		title = fmt.Sprintf("%s - %s", run.Series, run.Episode)
+	}
 	desc := fmt.Sprintf("A gentle sleep narration.\n\nSeries: %s\nEpisode: %s\nStyle: %s",
 		run.Series, run.Episode, run.Style)
 

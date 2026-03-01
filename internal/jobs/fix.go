@@ -102,7 +102,7 @@ func (fe *FixEngine) RecordOutcome(outcome FixOutcome) {
 
 func isStageExhausted(stage domain.RunStatus, ft FailType, run *domain.Run, policy Policy) bool {
 	switch {
-	case ft == FailBannedPhrase || ft == FailWordcountLow || ft == FailWordcountHigh || ft == FailPacingFail:
+	case ft == FailBannedPhrase || ft == FailWordcountLow || ft == FailWordcountHigh || ft == FailPacingFail || ft == FailTitleInvalid:
 		return run.ScriptAttempt >= policy.MaxScriptAttempt
 	case ft == FailAudioDurationOff || ft == FailAudioClipping || ft == FailDurationMismatch:
 		return run.VoiceAttempt >= policy.MaxVoiceAttempt
