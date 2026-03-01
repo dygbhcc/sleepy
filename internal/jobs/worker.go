@@ -10,6 +10,7 @@ import (
 	"sleepy/internal/domain"
 	"sleepy/internal/providers/image"
 	"sleepy/internal/providers/llm"
+	"sleepy/internal/providers/youtube"
 	"sleepy/internal/render"
 	"sleepy/internal/storage"
 )
@@ -45,6 +46,8 @@ type Deps struct {
 	Render    render.RenderConfig
 	FixEngine *FixEngine // nil = legacy Decide() path
 	InflightLimits InflightLimits // per-stage concurrency caps (0 = unlimited)
+	YouTube        *youtube.Client // nil = YouTube upload disabled
+	YouTubePrivacy string          // "unlisted", "public", "private"
 }
 
 // InflightLimits caps how many runs can be actively processed per stage.
@@ -179,7 +182,14 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 
 	case domain.StatusPackaged:
 		report = qaPackage(ctx, deps, run)
-		if report.Pass {
+		// qaPackage pass → advance to UPLOADED (YouTube step will handle skip if disabled)
+
+	case domain.StatusUploaded:
+		stepErr = stepYouTube(ctx, deps, run)
+		if !isAuthError(stepErr) && stepErr != nil {
+			_ = deps.DB.IncrementAttempt(ctx, run.ID, "youtube_attempt")
+		}
+		if stepErr == nil {
 			clearFixState(ctx, deps.DB, run.ID)
 			if err := deps.DB.UpdateRunStatus(ctx, run.ID, domain.StatusDone); err != nil {
 				return fmt.Errorf("advance to DONE: %w", err)

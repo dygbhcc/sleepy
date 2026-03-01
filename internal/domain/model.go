@@ -20,6 +20,7 @@ type Run struct {
 	VoiceAttempt   int
 	RenderAttempt  int
 	PackageAttempt int
+	YouTubeAttempt int
 	LastError      string
 	NeedsReview    bool
 	ScriptHash     string
@@ -32,6 +33,9 @@ type Run struct {
 
 	// Voice approval gate
 	VoiceApproved bool
+
+	// YouTube upload
+	YouTubeVideoID string
 
 	// Fix engine fields
 	ActiveFixPlanID      string
@@ -81,6 +85,16 @@ type WorkerSettings struct {
 	EdgeVoice         string
 	EdgeRate          string
 	Normalize         bool
+
+	// YouTube upload
+	YouTubeEnabled      bool
+	YouTubePrivacy      string // "unlisted", "public", "private"
+	YouTubeClientID     string
+	YouTubeClientSecret string
+	YouTubeAccessToken  string
+	YouTubeRefreshToken string
+	YouTubeTokenExpiry  time.Time
+
 	UpdatedAt         time.Time
 }
 

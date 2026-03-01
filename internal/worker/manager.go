@@ -13,6 +13,7 @@ import (
 	"sleepy/internal/providers/image"
 	"sleepy/internal/providers/llm"
 	"sleepy/internal/providers/tts"
+	"sleepy/internal/providers/youtube"
 	"sleepy/internal/render"
 	"sleepy/internal/storage"
 )
@@ -137,6 +138,18 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 			MusicVol:   0.5,
 		},
 		FixEngine: jobs.NewFixEngine(outcomes),
+	}
+
+	// Wire up YouTube client if configured.
+	if settings.YouTubeEnabled && settings.YouTubeClientID != "" && settings.YouTubeClientSecret != "" {
+		addr := "http://localhost:8080"
+		oauthCfg := youtube.NewOAuthConfig(settings.YouTubeClientID, settings.YouTubeClientSecret, addr+"/api/youtube/callback")
+		deps.YouTube = youtube.NewClient(oauthCfg, m.db)
+		deps.YouTubePrivacy = settings.YouTubePrivacy
+		if deps.YouTubePrivacy == "" {
+			deps.YouTubePrivacy = "unlisted"
+		}
+		log.Printf("worker-manager: YouTube upload enabled (privacy=%s)", deps.YouTubePrivacy)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

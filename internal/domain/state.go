@@ -10,6 +10,7 @@ const (
 	StatusThumbnailed RunStatus = "THUMBNAILED"
 	StatusRendered    RunStatus = "RENDERED"
 	StatusPackaged    RunStatus = "PACKAGED"
+	StatusUploaded    RunStatus = "UPLOADED"
 	StatusDone        RunStatus = "DONE"
 	StatusFailed      RunStatus = "FAILED"
 	StatusNeedsReview RunStatus = "NEEDS_REVIEW"
@@ -40,6 +41,8 @@ func NextStatus(s RunStatus) RunStatus {
 	case StatusRendered:
 		return StatusPackaged
 	case StatusPackaged:
+		return StatusUploaded
+	case StatusUploaded:
 		return StatusDone
 	default:
 		return StatusFailed

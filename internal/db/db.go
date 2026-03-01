@@ -8,6 +8,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"golang.org/x/oauth2"
 
 	"sleepy/internal/domain"
 )
@@ -41,17 +42,17 @@ func (d *DB) Close() error { return d.pool.Close() }
 // ---------- runs ----------
 
 const runColumns = `id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at,
-	script_attempt, voice_attempt, render_attempt, package_attempt, last_error, needs_review,
+	script_attempt, voice_attempt, render_attempt, package_attempt, youtube_attempt, last_error, needs_review,
 	script_hash, voice_hash, render_hash, locked_by, locked_at,
-	voice_approved, active_fix_plan_id, active_fix_start_attempt, policy_overrides_json`
+	voice_approved, youtube_video_id, active_fix_plan_id, active_fix_start_attempt, policy_overrides_json`
 
 func scanRun(row interface{ Scan(...any) error }, r *domain.Run) error {
 	return row.Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
 		&r.Status, &r.ErrorText, &r.CreatedAt, &r.UpdatedAt,
-		&r.ScriptAttempt, &r.VoiceAttempt, &r.RenderAttempt, &r.PackageAttempt,
+		&r.ScriptAttempt, &r.VoiceAttempt, &r.RenderAttempt, &r.PackageAttempt, &r.YouTubeAttempt,
 		&r.LastError, &r.NeedsReview, &r.ScriptHash, &r.VoiceHash, &r.RenderHash,
 		&r.LockedBy, &r.LockedAt,
-		&r.VoiceApproved, &r.ActiveFixPlanID, &r.ActiveFixStartAttempt, &r.PolicyOverridesJSON)
+		&r.VoiceApproved, &r.YouTubeVideoID, &r.ActiveFixPlanID, &r.ActiveFixStartAttempt, &r.PolicyOverridesJSON)
 }
 
 // GetRun loads a run by ID.
@@ -96,6 +97,7 @@ func (d *DB) IncrementAttempt(ctx context.Context, id string, column string) err
 	allowed := map[string]bool{
 		"script_attempt": true, "voice_attempt": true,
 		"render_attempt": true, "package_attempt": true,
+		"youtube_attempt": true,
 	}
 	if !allowed[column] {
 		return fmt.Errorf("invalid attempt column: %s", column)
@@ -168,7 +170,7 @@ func (d *DB) UpdateRunLastError(ctx context.Context, id string, errText string) 
 // ResetAttempts resets all attempt counters to zero (used when retrying from UI).
 func (d *DB) ResetAttempts(ctx context.Context, id string) error {
 	_, err := d.pool.ExecContext(ctx,
-		`UPDATE runs SET script_attempt=0, voice_attempt=0, render_attempt=0, package_attempt=0,
+		`UPDATE runs SET script_attempt=0, voice_attempt=0, render_attempt=0, package_attempt=0, youtube_attempt=0,
 		 needs_review=FALSE, last_error='', updated_at=now() WHERE id = $1`, id,
 	)
 	if err != nil {
@@ -532,13 +534,19 @@ func (d *DB) GetWorkerSettings(ctx context.Context) (*domain.WorkerSettings, err
 		        worker_mode, require_voice_approval, max_inflight_script, max_inflight_tts, max_inflight_render,
 		        openai_api_key, openai_base_url, openai_model,
 		        elevenlabs_api_key, elevenlabs_voice_id, elevenlabs_model_id, elevenlabs_speed,
-		        edge_voice, edge_rate, normalize, updated_at
+		        edge_voice, edge_rate, normalize,
+		        youtube_enabled, youtube_privacy, youtube_client_id, youtube_client_secret,
+		        youtube_access_token, youtube_refresh_token, youtube_token_expiry,
+		        updated_at
 		 FROM worker_settings WHERE id = 1`,
 	).Scan(&s.Mode,
 		&s.WorkerMode, &s.RequireVoiceApproval, &s.MaxInflightScript, &s.MaxInflightTTS, &s.MaxInflightRender,
 		&s.OpenAIAPIKey, &s.OpenAIBaseURL, &s.OpenAIModel,
 		&s.ElevenLabsAPIKey, &s.ElevenLabsVoiceID, &s.ElevenLabsModelID, &s.ElevenLabsSpeed,
-		&s.EdgeVoice, &s.EdgeRate, &s.Normalize, &s.UpdatedAt)
+		&s.EdgeVoice, &s.EdgeRate, &s.Normalize,
+		&s.YouTubeEnabled, &s.YouTubePrivacy, &s.YouTubeClientID, &s.YouTubeClientSecret,
+		&s.YouTubeAccessToken, &s.YouTubeRefreshToken, &s.YouTubeTokenExpiry,
+		&s.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get worker settings: %w", err)
 	}
@@ -553,16 +561,79 @@ func (d *DB) SaveWorkerSettings(ctx context.Context, s *domain.WorkerSettings) e
 			worker_mode = $2, require_voice_approval = $3, max_inflight_script = $4, max_inflight_tts = $5, max_inflight_render = $6,
 			openai_api_key = $7, openai_base_url = $8, openai_model = $9,
 			elevenlabs_api_key = $10, elevenlabs_voice_id = $11, elevenlabs_model_id = $12, elevenlabs_speed = $13,
-			edge_voice = $14, edge_rate = $15, normalize = $16, updated_at = now()
+			edge_voice = $14, edge_rate = $15, normalize = $16,
+			youtube_enabled = $17, youtube_privacy = $18, youtube_client_id = $19, youtube_client_secret = $20,
+			youtube_access_token = $21, youtube_refresh_token = $22, youtube_token_expiry = $23,
+			updated_at = now()
 		 WHERE id = 1`,
 		s.Mode,
 		s.WorkerMode, s.RequireVoiceApproval, s.MaxInflightScript, s.MaxInflightTTS, s.MaxInflightRender,
 		s.OpenAIAPIKey, s.OpenAIBaseURL, s.OpenAIModel,
 		s.ElevenLabsAPIKey, s.ElevenLabsVoiceID, s.ElevenLabsModelID, s.ElevenLabsSpeed,
 		s.EdgeVoice, s.EdgeRate, s.Normalize,
+		s.YouTubeEnabled, s.YouTubePrivacy, s.YouTubeClientID, s.YouTubeClientSecret,
+		s.YouTubeAccessToken, s.YouTubeRefreshToken, s.YouTubeTokenExpiry,
 	)
 	if err != nil {
 		return fmt.Errorf("save worker settings: %w", err)
+	}
+	return nil
+}
+
+// ---------- YouTube token store ----------
+
+// GetYouTubeToken reads the OAuth2 token from worker_settings.
+func (d *DB) GetYouTubeToken(ctx context.Context) (*oauth2.Token, error) {
+	var access, refresh string
+	var expiry time.Time
+	err := d.pool.QueryRowContext(ctx,
+		`SELECT youtube_access_token, youtube_refresh_token, youtube_token_expiry FROM worker_settings WHERE id = 1`,
+	).Scan(&access, &refresh, &expiry)
+	if err != nil {
+		return nil, fmt.Errorf("get youtube token: %w", err)
+	}
+	if refresh == "" {
+		return nil, nil
+	}
+	return &oauth2.Token{
+		AccessToken:  access,
+		RefreshToken: refresh,
+		Expiry:       expiry,
+		TokenType:    "Bearer",
+	}, nil
+}
+
+// SaveYouTubeToken persists an OAuth2 token to worker_settings.
+func (d *DB) SaveYouTubeToken(ctx context.Context, tok *oauth2.Token) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE worker_settings SET youtube_access_token = $1, youtube_refresh_token = $2, youtube_token_expiry = $3, updated_at = now() WHERE id = 1`,
+		tok.AccessToken, tok.RefreshToken, tok.Expiry,
+	)
+	if err != nil {
+		return fmt.Errorf("save youtube token: %w", err)
+	}
+	return nil
+}
+
+// ClearYouTubeToken removes the stored YouTube OAuth2 token.
+func (d *DB) ClearYouTubeToken(ctx context.Context) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE worker_settings SET youtube_access_token = '', youtube_refresh_token = '', youtube_token_expiry = '1970-01-01', updated_at = now() WHERE id = 1`,
+	)
+	if err != nil {
+		return fmt.Errorf("clear youtube token: %w", err)
+	}
+	return nil
+}
+
+// SetYouTubeVideoID records the YouTube video ID for a run.
+func (d *DB) SetYouTubeVideoID(ctx context.Context, runID, videoID string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET youtube_video_id = $1, updated_at = now() WHERE id = $2`,
+		videoID, runID,
+	)
+	if err != nil {
+		return fmt.Errorf("set youtube video id: %w", err)
 	}
 	return nil
 }

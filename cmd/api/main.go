@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -15,6 +17,7 @@ import (
 	"sleepy/internal/db"
 	"sleepy/internal/domain"
 	"sleepy/internal/jobs"
+	"sleepy/internal/providers/youtube"
 	"sleepy/internal/worker"
 )
 
@@ -63,6 +66,11 @@ func main() {
 	mux.HandleFunc("POST /api/worker/start", handleWorkerStart)
 	mux.HandleFunc("POST /api/worker/stop", handleWorkerStop)
 	mux.HandleFunc("GET /api/worker/status", handleWorkerStatus)
+	mux.HandleFunc("GET /api/youtube/auth", handleYouTubeAuth)
+	mux.HandleFunc("GET /api/youtube/callback", handleYouTubeCallback)
+	mux.HandleFunc("GET /api/youtube/status", handleYouTubeStatus)
+	mux.HandleFunc("POST /api/youtube/disconnect", handleYouTubeDisconnect)
+	mux.HandleFunc("POST /api/runs/{id}/upload-youtube", handleUploadYouTube)
 	mux.HandleFunc("GET /assets/{runID}/{file}", handleServeAsset)
 
 	addr := os.Getenv("ADDR")
@@ -471,8 +479,13 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"elevenlabs_speed":   s.ElevenLabsSpeed,
 		"edge_voice":         s.EdgeVoice,
 		"edge_rate":          s.EdgeRate,
-		"normalize":          s.Normalize,
-		"updated_at":         s.UpdatedAt,
+		"normalize":              s.Normalize,
+		"youtube_enabled":         s.YouTubeEnabled,
+		"youtube_privacy":         s.YouTubePrivacy,
+		"youtube_client_id":       s.YouTubeClientID,
+		"youtube_client_secret":   maskKey(s.YouTubeClientSecret),
+		"youtube_connected":       s.YouTubeRefreshToken != "",
+		"updated_at":              s.UpdatedAt,
 	})
 }
 
@@ -486,9 +499,13 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		ElevenLabsVoiceID *string  `json:"elevenlabs_voice_id"`
 		ElevenLabsModelID *string  `json:"elevenlabs_model_id"`
 		ElevenLabsSpeed   *float64 `json:"elevenlabs_speed"`
-		EdgeVoice         *string  `json:"edge_voice"`
-		EdgeRate          *string  `json:"edge_rate"`
-		Normalize         *bool    `json:"normalize"`
+		EdgeVoice            *string  `json:"edge_voice"`
+		EdgeRate             *string  `json:"edge_rate"`
+		Normalize            *bool    `json:"normalize"`
+		YouTubeEnabled       *bool    `json:"youtube_enabled"`
+		YouTubePrivacy       *string  `json:"youtube_privacy"`
+		YouTubeClientID      *string  `json:"youtube_client_id"`
+		YouTubeClientSecret  *string  `json:"youtube_client_secret"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
@@ -534,6 +551,18 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Normalize != nil {
 		s.Normalize = *req.Normalize
+	}
+	if req.YouTubeEnabled != nil {
+		s.YouTubeEnabled = *req.YouTubeEnabled
+	}
+	if req.YouTubePrivacy != nil {
+		s.YouTubePrivacy = *req.YouTubePrivacy
+	}
+	if req.YouTubeClientID != nil {
+		s.YouTubeClientID = *req.YouTubeClientID
+	}
+	if req.YouTubeClientSecret != nil && *req.YouTubeClientSecret != "" && !strings.HasPrefix(*req.YouTubeClientSecret, "***") {
+		s.YouTubeClientSecret = *req.YouTubeClientSecret
 	}
 
 	if err := store.SaveWorkerSettings(r.Context(), s); err != nil {
@@ -658,4 +687,128 @@ func handleUpdateThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"path": destPath})
+}
+
+// ---------- YouTube ----------
+
+func getYouTubeClient(ctx context.Context) (*youtube.Client, error) {
+	s, err := store.GetWorkerSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.YouTubeClientID == "" || s.YouTubeClientSecret == "" {
+		return nil, fmt.Errorf("YouTube client ID and secret not configured")
+	}
+	oauthCfg := youtube.NewOAuthConfig(s.YouTubeClientID, s.YouTubeClientSecret, baseURL()+"/api/youtube/callback")
+	return youtube.NewClient(oauthCfg, store), nil
+}
+
+func baseURL() string {
+	addr := os.Getenv("ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	if strings.HasPrefix(addr, ":") {
+		return "http://localhost" + addr
+	}
+	return "http://" + addr
+}
+
+func handleYouTubeAuth(w http.ResponseWriter, r *http.Request) {
+	yt, err := getYouTubeClient(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	url := yt.AuthURL("sleepy-youtube")
+	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+}
+
+func handleYouTubeCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		writeErr(w, http.StatusBadRequest, "missing code parameter")
+		return
+	}
+
+	yt, err := getYouTubeClient(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := yt.Exchange(r.Context(), code); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Redirect back to the app settings page.
+	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+}
+
+func handleYouTubeStatus(w http.ResponseWriter, r *http.Request) {
+	yt, err := getYouTubeClient(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]bool{"connected": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"connected": yt.HasToken(r.Context())})
+}
+
+func handleYouTubeDisconnect(w http.ResponseWriter, r *http.Request) {
+	if err := store.ClearYouTubeToken(r.Context()); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+}
+
+func handleUploadYouTube(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run, err := store.GetRun(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	videoAsset, err := store.GetAsset(r.Context(), id, domain.AssetVideoMP4)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "no video asset found for this run")
+		return
+	}
+
+	yt, err := getYouTubeClient(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	s, _ := store.GetWorkerSettings(r.Context())
+	privacy := "unlisted"
+	if s != nil && s.YouTubePrivacy != "" {
+		privacy = s.YouTubePrivacy
+	}
+
+	title := fmt.Sprintf("%s - %s", run.Series, run.Episode)
+	desc := fmt.Sprintf("A gentle sleep narration.\n\nSeries: %s\nEpisode: %s\nStyle: %s",
+		run.Series, run.Episode, run.Style)
+
+	videoID, err := yt.Upload(r.Context(), youtube.UploadRequest{
+		FilePath:    videoAsset.Path,
+		Title:       title,
+		Description: desc,
+		Tags:        []string{"sleep", "narration", "relaxation", run.Style, run.Series},
+		Privacy:     privacy,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	_ = store.SetYouTubeVideoID(r.Context(), id, videoID)
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"video_id": videoID,
+		"url":      "https://youtube.com/watch?v=" + videoID,
+	})
 }

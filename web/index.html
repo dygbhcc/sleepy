@@ -380,6 +380,40 @@ tr:hover{background:var(--surface2);cursor:pointer}
         </label>
       </div>
 
+      <!-- YouTube -->
+      <div class="settings-section" style="margin-top:16px">
+        <h3 style="margin:0 0 12px;font-size:14px;color:var(--text-secondary)">YouTube Upload</h3>
+        <div class="settings-grid">
+          <div class="form-group settings-full" style="display:flex;align-items:center;gap:8px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin:0">
+              <input type="checkbox" id="sYouTubeEnabled">
+              <span>Enable YouTube upload</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label>Client ID</label>
+            <input type="text" id="sYTClientID" placeholder="xxxx.apps.googleusercontent.com">
+          </div>
+          <div class="form-group">
+            <label>Client Secret</label>
+            <input type="password" id="sYTClientSecret" placeholder="GOCSPX-...">
+          </div>
+          <div class="form-group">
+            <label>Privacy</label>
+            <select id="sYTPrivacy">
+              <option value="unlisted">Unlisted</option>
+              <option value="public">Public</option>
+              <option value="private">Private</option>
+            </select>
+          </div>
+          <div class="form-group" style="display:flex;align-items:end;gap:8px">
+            <button class="btn btn-sm" id="ytConnectBtn" onclick="connectYouTube()" style="background:var(--accent);color:#fff">Connect YouTube</button>
+            <button class="btn btn-sm btn-danger" id="ytDisconnectBtn" onclick="disconnectYouTube()" style="display:none">Disconnect</button>
+            <span id="ytStatus" style="font-size:12px;color:var(--text-secondary)"></span>
+          </div>
+        </div>
+      </div>
+
       <button class="btn btn-primary btn-block" onclick="saveSettings()" data-i18n="saveSettings"></button>
 
       <!-- Worker controls -->
@@ -814,11 +848,11 @@ let refreshTimer = null;
 let detailPollTimer = null;
 let detailRunID = null;
 
-const STATUSES = ['ALL','PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','DONE','FAILED','NEEDS_REVIEW'];
-const PIPELINE = ['PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','DONE'];
+const STATUSES = ['ALL','PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','UPLOADED','DONE','FAILED','NEEDS_REVIEW'];
+const PIPELINE = ['PENDING','SCRIPTED','VOICED','THUMBNAILED','RENDERED','PACKAGED','UPLOADED','DONE'];
 
 function statusClass(s){
-  if(s==='DONE'||s==='PACKAGED')return 'badge-done';
+  if(s==='DONE'||s==='PACKAGED'||s==='UPLOADED')return 'badge-done';
   if(s==='FAILED')return 'badge-failed';
   if(s==='NEEDS_REVIEW')return 'badge-review';
   if(s==='PENDING')return 'badge-pending';
@@ -872,7 +906,7 @@ function renderStats(){
   STATUSES.slice(1).forEach(s=>counts[s]=0);
   allRuns.forEach(r=>counts[r.Status]=(counts[r.Status]||0)+1);
   area.innerHTML='';
-  [[t('total'),allRuns.length,'var(--accent)'],[t('pending'),counts.PENDING||0,'var(--yellow)'],[t('inProgress'),(counts.SCRIPTED||0)+(counts.VOICED||0)+(counts.THUMBNAILED||0)+(counts.RENDERED||0)+(counts.PACKAGED||0),'var(--blue)'],[t('completed'),counts.DONE||0,'var(--green)'],[t('failed'),counts.FAILED||0,'var(--red)']].forEach(([label,val,color])=>{
+  [[t('total'),allRuns.length,'var(--accent)'],[t('pending'),counts.PENDING||0,'var(--yellow)'],[t('inProgress'),(counts.SCRIPTED||0)+(counts.VOICED||0)+(counts.THUMBNAILED||0)+(counts.RENDERED||0)+(counts.PACKAGED||0)+(counts.UPLOADED||0),'var(--blue)'],[t('completed'),counts.DONE||0,'var(--green)'],[t('failed'),counts.FAILED||0,'var(--red)']].forEach(([label,val,color])=>{
     area.innerHTML+=`<div style="background:var(--surface2);border-radius:8px;padding:16px;text-align:center">
       <div style="font-size:28px;font-weight:700;color:${color}">${val}</div>
       <div style="font-size:12px;color:var(--text2);margin-top:4px">${label}</div></div>`;
@@ -898,14 +932,15 @@ function renderTable(){
 }
 
 function renderPipelineProgress(run){
-  // 6 steps: PENDING→SCRIPTED→VOICED→THUMBNAILED→RENDERED→PACKAGED→DONE
+  // 7 steps: PENDING→SCRIPTED→VOICED→THUMBNAILED→RENDERED→PACKAGED→UPLOADED→DONE
   const steps=[
     {status:'PENDING',    label:t('stageScript')},
     {status:'SCRIPTED',   label:t('stageVoice')},
     {status:'VOICED',     label:t('stageThumbnail')},
     {status:'THUMBNAILED',label:t('stageRender')},
     {status:'RENDERED',   label:t('stagePackage')},
-    {status:'PACKAGED',   label:t('stageDone')},
+    {status:'PACKAGED',   label:'Upload'},
+    {status:'UPLOADED',   label:t('stageDone')},
   ];
   const isFailed=run.Status==='FAILED';
   const isReview=run.Status==='NEEDS_REVIEW';
@@ -1128,6 +1163,16 @@ function renderDetail(data){
     videoHTML=`<div class="section"><h3>${t('video')}</h3><video class="video-player" controls><source src="${API}/assets/${run.ID}/${fname}" type="video/mp4">${t('videoNotSupported')}</video></div>`;
   }
 
+  // YouTube section
+  let youtubeHTML='';
+  if(videoAsset){
+    if(run.YouTubeVideoID){
+      youtubeHTML=`<div class="section"><h3>YouTube</h3><a href="https://youtube.com/watch?v=${run.YouTubeVideoID}" target="_blank" style="color:var(--accent)">youtube.com/watch?v=${run.YouTubeVideoID}</a></div>`;
+    }else{
+      youtubeHTML=`<div class="section"><h3>YouTube</h3><button class="btn btn-sm" style="background:#c4302b;color:#fff" onclick="uploadToYouTube('${run.ID}')">Upload to YouTube</button></div>`;
+    }
+  }
+
   // Script section
   const scriptAsset=assets.find(a=>a.Kind==='script_md');
   const canEditScript=scriptAsset||(run.Status==='NEEDS_REVIEW'||run.Status==='FAILED');
@@ -1149,12 +1194,13 @@ function renderDetail(data){
 
   // Autopilot info (attempts + last error)
   let autopilotHTML='';
-  if(run.ScriptAttempt||run.VoiceAttempt||run.RenderAttempt||run.PackageAttempt){
+  if(run.ScriptAttempt||run.VoiceAttempt||run.RenderAttempt||run.PackageAttempt||run.YouTubeAttempt){
     autopilotHTML='<div class="section"><h3>Autopilot</h3><div class="detail-grid">';
     autopilotHTML+=`<div class="detail-item"><div class="label">Script Attempts</div><div class="value">${run.ScriptAttempt}</div></div>`;
     autopilotHTML+=`<div class="detail-item"><div class="label">Voice Attempts</div><div class="value">${run.VoiceAttempt}</div></div>`;
     autopilotHTML+=`<div class="detail-item"><div class="label">Render Attempts</div><div class="value">${run.RenderAttempt}</div></div>`;
     autopilotHTML+=`<div class="detail-item"><div class="label">Package Attempts</div><div class="value">${run.PackageAttempt}</div></div>`;
+    if(run.YouTubeAttempt)autopilotHTML+=`<div class="detail-item"><div class="label">YouTube Attempts</div><div class="value">${run.YouTubeAttempt}</div></div>`;
     autopilotHTML+='</div>';
     if(run.LastError){
       autopilotHTML+=`<div class="error-box" style="margin-top:10px"><strong>Last Error:</strong>\n${esc(run.LastError)}</div>`;
@@ -1162,7 +1208,7 @@ function renderDetail(data){
     autopilotHTML+='</div>';
   }
 
-  document.getElementById('modalBody').innerHTML=progressHTML+approvalHTML+errorHTML+detailHTML+autopilotHTML+assetsHTML+thumbHTML+videoHTML+scriptHTML;
+  document.getElementById('modalBody').innerHTML=progressHTML+approvalHTML+errorHTML+detailHTML+autopilotHTML+assetsHTML+thumbHTML+videoHTML+youtubeHTML+scriptHTML;
 
   // Footer buttons
   let footerHTML='';
@@ -1324,6 +1370,12 @@ async function loadSettings(){
     if(s.edge_voice)document.getElementById('sEdgeVoice').value=s.edge_voice;
     if(s.edge_rate)document.getElementById('sEdgeRate').value=s.edge_rate;
     document.getElementById('sNormalize').checked=s.normalize!==false;
+    // YouTube
+    document.getElementById('sYouTubeEnabled').checked=!!s.youtube_enabled;
+    document.getElementById('sYTClientID').value=s.youtube_client_id||'';
+    document.getElementById('sYTClientSecret').value=s.youtube_client_secret||'';
+    if(s.youtube_privacy)document.getElementById('sYTPrivacy').value=s.youtube_privacy;
+    updateYouTubeStatus(s.youtube_connected);
   }catch(e){console.error('load settings:',e)}
 }
 
@@ -1339,13 +1391,60 @@ async function saveSettings(){
     elevenlabs_speed:parseFloat(document.getElementById('sElevenSpeed').value)||0.80,
     edge_voice:document.getElementById('sEdgeVoice').value,
     edge_rate:document.getElementById('sEdgeRate').value,
-    normalize:document.getElementById('sNormalize').checked
+    normalize:document.getElementById('sNormalize').checked,
+    youtube_enabled:document.getElementById('sYouTubeEnabled').checked,
+    youtube_privacy:document.getElementById('sYTPrivacy').value,
+    youtube_client_id:document.getElementById('sYTClientID').value,
+    youtube_client_secret:document.getElementById('sYTClientSecret').value
   };
   try{
     const res=await fetch(API+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!res.ok)throw new Error((await res.json()).error);
     toast(t('settingsSaved'));
   }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
+}
+
+// ==================== YouTube ====================
+function updateYouTubeStatus(connected){
+  const st=document.getElementById('ytStatus');
+  const connBtn=document.getElementById('ytConnectBtn');
+  const discBtn=document.getElementById('ytDisconnectBtn');
+  if(connected){
+    st.textContent='Connected';st.style.color='var(--success)';
+    connBtn.style.display='none';discBtn.style.display='';
+  }else{
+    st.textContent='Not connected';st.style.color='var(--text-secondary)';
+    connBtn.style.display='';discBtn.style.display='none';
+  }
+}
+async function connectYouTube(){
+  window.location.href=API+'/api/youtube/auth';
+}
+async function disconnectYouTube(){
+  try{
+    await fetch(API+'/api/youtube/disconnect',{method:'POST'});
+    updateYouTubeStatus(false);
+    toast('YouTube disconnected');
+  }catch(e){toast('Error: '+e.message,'error')}
+}
+async function uploadToYouTube(runId){
+  const btn=event.target;btn.disabled=true;btn.textContent='Uploading...';
+  try{
+    const res=await fetch(API+'/api/runs/'+runId+'/upload-youtube',{method:'POST'});
+    const data=await res.json();
+    if(!res.ok)throw new Error(data.error);
+    toast('Uploaded! Video ID: '+data.video_id);
+    btn.textContent='Uploaded';
+    if(data.url){
+      const link=document.createElement('a');
+      link.href=data.url;link.target='_blank';link.textContent='Watch on YouTube';
+      link.style.cssText='margin-left:8px;color:var(--accent);font-size:12px';
+      btn.parentNode.appendChild(link);
+    }
+  }catch(e){
+    toast('Upload failed: '+e.message,'error');
+    btn.disabled=false;btn.textContent='Upload to YouTube';
+  }
 }
 
 // ==================== Worker control ====================
