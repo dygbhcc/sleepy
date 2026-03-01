@@ -105,15 +105,21 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 	}
 
 	// Compute a hard max_tokens ceiling to prevent runaway generation.
-	// The SSML section roughly doubles the markdown, and ~1.3 tokens per word.
-	// Use MaxWords if set, otherwise estimate from wordCount.
+	// LLM now produces markdown only (no SSML), so budget is ~1.5 tokens/word + headroom.
 	capWords := req.MaxWords
 	if capWords <= 0 {
 		capWords = wordCount
 	}
-	maxTokens := capWords * 3 // markdown + SSML + headroom
+	// Token budget: ~1.5 tokens/word for English, ~2 for Turkish/other.
+	// Use 2x to avoid truncating non-English scripts while still capping runaway.
+	maxTokens := capWords * 2
 
-	raw, err := c.chatCompletionWithRetry(ctx, messages, req.Temperature, maxTokens)
+	raw, err := c.chatCompletionWithRetry(ctx, messages, completionOpts{
+		Temperature:      req.Temperature,
+		MaxTokens:        maxTokens,
+		FrequencyPenalty: 0.2,
+		PresencePenalty:  0.3,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +156,10 @@ Write exactly ONE short video title. Rules:
 		{Role: "user", Content: userPrompt},
 	}
 
-	raw, err := c.chatCompletionWithRetry(ctx, messages, 0.7, 100)
+	raw, err := c.chatCompletionWithRetry(ctx, messages, completionOpts{
+		Temperature: 0.7,
+		MaxTokens:   100,
+	})
 	if err != nil {
 		return "", fmt.Errorf("generate title: %w", err)
 	}
@@ -166,10 +175,10 @@ Write exactly ONE short video title. Rules:
 // chatCompletionWithRetry wraps chatCompletion with transient-error retries
 // (429, 502, 503, 504) so the caller doesn't have to mix transient retries
 // with QA retries.
-func (c *Client) chatCompletionWithRetry(ctx context.Context, msgs []chatMsg, temperature float64, maxTokens int) (string, error) {
+func (c *Client) chatCompletionWithRetry(ctx context.Context, msgs []chatMsg, opts completionOpts) (string, error) {
 	const maxTransient = 4
 	for i := 0; i < maxTransient; i++ {
-		raw, err := c.chatCompletion(ctx, msgs, temperature, maxTokens)
+		raw, err := c.chatCompletion(ctx, msgs, opts)
 		if err == nil {
 			return raw, nil
 		}
@@ -195,10 +204,12 @@ type chatMsg struct {
 }
 
 type chatReq struct {
-	Model       string    `json:"model"`
-	Messages    []chatMsg `json:"messages"`
-	Temperature float64   `json:"temperature"`
-	MaxTokens   int       `json:"max_tokens,omitempty"`
+	Model            string    `json:"model"`
+	Messages         []chatMsg `json:"messages"`
+	Temperature      float64   `json:"temperature"`
+	MaxCompletionTokens int    `json:"max_completion_tokens,omitempty"`
+	FrequencyPenalty float64   `json:"frequency_penalty,omitempty"`
+	PresencePenalty  float64   `json:"presence_penalty,omitempty"`
 }
 
 type chatResp struct {
@@ -212,15 +223,25 @@ type chatResp struct {
 	} `json:"error,omitempty"`
 }
 
-func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, temperature float64, maxTokens int) (string, error) {
+type completionOpts struct {
+	Temperature      float64
+	MaxTokens        int
+	FrequencyPenalty float64
+	PresencePenalty  float64
+}
+
+func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, opts completionOpts) (string, error) {
+	temperature := opts.Temperature
 	if temperature <= 0 {
 		temperature = 0.7
 	}
 	body, err := json.Marshal(chatReq{
-		Model:       c.cfg.Model,
-		Messages:    msgs,
-		Temperature: temperature,
-		MaxTokens:   maxTokens,
+		Model:            c.cfg.Model,
+		Messages:         msgs,
+		Temperature:      temperature,
+		MaxCompletionTokens: opts.MaxTokens,
+		FrequencyPenalty: opts.FrequencyPenalty,
+		PresencePenalty:  opts.PresencePenalty,
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
@@ -277,38 +298,29 @@ func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, temperature
 
 // -------- Prompt template --------
 
-const systemPrompt = `You are a professional sleep narration scriptwriter. You write extremely calm, slow-paced narration for sleep videos. Your prose is gentle, hypnotic, and monotone-friendly. You never include action, tension, conflict, or anything stimulating. Every sentence should feel like a soft exhale.
+const systemPrompt = `You are a sleep narration scriptwriter. You produce calm, slow-paced plain text for sleep videos.
 
-STRICTLY FORBIDDEN CONTENT:
+=== ABSOLUTE RULES (violating any = failure) ===
 
-1. Any language implying danger, threat, urgency, or risk.
-2. Any language implying disappearance, annihilation, or endings.
-3. Any existential or philosophical questioning.
-4. Any dramatic emotional escalation.
-5. Any sudden transitions or intensity spikes.
-6. Any wake-up instructions, alertness cues, or references to waking.
-7. Any mention of violence, weapons, combat, or physical harm.
-8. Any reference to blood, death, killing, or destruction.
+1. BANNED WORDS — never use: suddenly, blood, scream, terror, panic, kill, dead, gun, fight, attack, explosion, horror, nightmare, violent, murder, death, war, battle, weapon, destroy, rage, wound, shriek, jolt, alarm, collapse, danger, fear, crash, void, disappear, fade away, swallow, consume, annihilate, wake up, open your eyes, become alert
+2. ZERO exclamation marks. Only use periods, commas, and occasional semicolons.
+3. Every sentence must be 8-20 words. No exceptions. Break long sentences with periods.
+4. No ALL CAPS words.
+5. No titles, headings, markdown, bullet points, numbered lists, SSML, or XML.
+6. No ellipsis (...), em-dashes (—), or decorative punctuation.
+7. No existential questions, philosophical musings, tension, conflict, or suspense.
+8. No wake-up cues or references to waking, alertness, or opening eyes.
+9. Plain prose paragraphs separated by blank lines. Nothing else.
 
-Examples of forbidden phrases (not exhaustive):
-- "the void consumes"
-- "you disappear"
-- "everything ends"
-- "nothing remains"
-- "what does it mean"
-- "darkness swallows"
-- "you are fading away"
-- "danger" / "collapse" / "falling into nothing"
-- "suddenly" / "jolt" / "alarm"
-- "open your eyes" / "wake up" / "become alert"
-
-If any forbidden language appears in your draft, silently correct it before returning the final script. Return only the final clean version.
-
-Tone constraints:
-- Calm, soft, stable.
-- No tension, no contrast spikes, no conflict.
+=== TONE ===
+- Calm, soft, stable, hypnotic, monotone-friendly.
 - Imagery must soothe, never startle.
-- Every paragraph should feel slower and softer than the one before.`
+- Every paragraph should feel slower and softer than the previous one.
+- Descriptive, sensory imagery only: sight, gentle sounds, soft textures, warmth.
+- Gradual, dreamlike progression with no plot.
+
+=== SELF-CHECK ===
+Before returning, scan your output for banned words and sentences over 20 words. Fix any violations silently. Return ONLY the clean script.`
 
 var langNames = map[string]string{
 	"en": "English",
@@ -324,48 +336,26 @@ Series: {{.Series}}
 Episode: {{.Episode}}
 Style: {{.Style}}
 Language: {{.LangName}}
-{{if and .MinWords .MaxWords}}Hard range: {{.MinWords}}–{{.MaxWords}} words.
+Style guide: {{.StyleGuide}}
+
+{{if and .MinWords .MaxWords}}=== WORD COUNT (MANDATORY) ===
 Target: {{.WordCount}} words.
-HARD RULE:
-- Do NOT exceed {{.MaxWords}} words.
-- Do NOT go below {{.MinWords}} words.
-- When within range, STOP immediately.
-- Do not add extra sections after reaching range.
-{{else}}Target: approximately {{.WordCount}} words ({{.DurationMin}} minutes at ~130 words per minute)
+Minimum: {{.MinWords}} words. Maximum: {{.MaxWords}} words.
+You MUST write at least {{.MinWords}} words. Keep writing new paragraphs until you reach {{.WordCount}}.
+STOP before exceeding {{.MaxWords}}. Do not stop early. Do not overshoot.
+{{else}}Word count: approximately {{.WordCount}} words ({{.DurationMin}} minutes at ~130 words per minute).
+Write at least {{.WordCount}} words. Do not stop early.
 {{end}}
-IMPORTANT: Write the ENTIRE script in {{.LangName}}. Every sentence, paragraph, and word must be in {{.LangName}}.
+Write the ENTIRE script in {{.LangName}}.
 
-Style guide for "{{.Style}}":
-{{.StyleGuide}}
+Additional rules:
+- Use present tense throughout.
+- Begin gently, let imagery soften further as the script continues.
+- End with a passage that fades into silence and stillness.
+- Each paragraph must introduce fresh imagery. No verbatim repetition.
+- Vary sentence length and vocabulary. Avoid looping patterns.
 
-Rules:
-- Use present tense throughout
-- Average sentence length: 10-18 words
-- No exclamation marks
-- No ALL CAPS words (except "SSML" in the format separator)
-- No dialogue or characters in conflict
-- NEVER use any of these banned words or stems: suddenly, blood, scream, terror, panic, kill, dead, gun, fight, attack, explosion, horror, nightmare, violent, murder, death, war, battle, weapon, destroy, rage, wound, shriek, jolt, alarm, collapse, danger, fear, crash
-- Never include wake-up cues ("open your eyes", "wake up", "become alert")
-- Descriptive, sensory imagery only: sight, gentle sounds, soft textures, warmth
-- Gradual, dreamlike progression with no plot
-- Begin gently and let the imagery soften further as the script continues
-- End with a passage that fades into silence and stillness
-- Avoid verbatim repetition of sentences or paragraphs
-- Do not reuse full sentences; repetition must be subtle variation, not duplication
-- Maintain variety in imagery and phrasing; avoid looping patterns
-
-Formatting rules (STRICT):
-- Do NOT include any title, heading, or episode name in the script body
-- Do NOT use markdown headers (#, ##, **bold**, etc.)
-- Do NOT use bullet points, numbered lists, or special formatting
-- Plain prose paragraphs only, separated by blank lines
-- No ellipsis (...), em-dashes (—), or decorative punctuation
-- Use only basic punctuation: periods, commas, and occasional semicolons
-
-Output format:
-First, output the script as plain prose paragraphs (no titles, no markdown).
-Then output a line containing exactly: ---SSML---
-Then output the same script wrapped in SSML with <break time="1s"/> tags between paragraphs. Wrap the entire SSML section in <speak> tags.`))
+Output: plain text paragraphs only, separated by blank lines. Nothing else.`))
 
 var styleGuides = map[string]string{
 	"Cosmos": "Imagery of deep space, drifting nebulae, distant stars, gentle cosmic winds, " +
@@ -402,30 +392,41 @@ func buildPrompt(req ScriptRequest, wordCount int) (string, error) {
 }
 
 func parseScriptResponse(raw string) (*ScriptResult, error) {
-	// Normalize separator variations the LLM may produce:
-	// "---\nSSML---", "---\n\nSSML---", "---SSML---" etc.
-	normalized := raw
-	for _, sep := range []string{"---\n\nSSML---", "---\nSSML---", "--- SSML ---", "---SSML ---"} {
-		if strings.Contains(normalized, sep) {
-			normalized = strings.Replace(normalized, sep, "---SSML---", 1)
+	// Strip any SSML section the model may have included despite instructions.
+	md := raw
+	for _, sep := range []string{"---SSML---", "---\nSSML---", "---\n\nSSML---", "--- SSML ---", "---SSML ---"} {
+		if idx := strings.Index(md, sep); idx >= 0 {
+			md = md[:idx]
 			break
 		}
 	}
-	parts := strings.SplitN(normalized, "---SSML---", 2)
-	md := strings.TrimSpace(parts[0])
+	md = strings.TrimSpace(md)
 	if md == "" {
-		return nil, fmt.Errorf("empty markdown section in LLM response")
+		return nil, fmt.Errorf("empty script in LLM response")
 	}
 
-	ssml := ""
-	if len(parts) == 2 {
-		ssml = strings.TrimSpace(parts[1])
-	}
-	// Fallback: wrap markdown in basic SSML if the model didn't produce one.
-	if ssml == "" {
-		ssml = "<speak>\n" + md + "\n</speak>"
-	}
+	// Generate SSML from markdown: wrap paragraphs with <break> tags.
+	ssml := markdownToSSML(md)
 	return &ScriptResult{Markdown: md, SSML: ssml}, nil
+}
+
+// markdownToSSML converts plain-text paragraphs into SSML with pauses between them.
+func markdownToSSML(md string) string {
+	paragraphs := strings.Split(md, "\n\n")
+	var b strings.Builder
+	b.WriteString("<speak>\n")
+	for i, p := range paragraphs {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if i > 0 {
+			b.WriteString("\n<break time=\"1s\"/>\n")
+		}
+		b.WriteString(p)
+	}
+	b.WriteString("\n</speak>")
+	return b.String()
 }
 
 func truncate(s string, n int) string {

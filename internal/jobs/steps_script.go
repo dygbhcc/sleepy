@@ -23,7 +23,7 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 		MinWords:         policy.MinWords,
 		MaxWords:         policy.MaxWords,
 		Temperature:      policy.LLMTemperature,
-		ExtraInstruction: strings.TrimSpace(policy.LLMExtraInstruction + "\n\n" + defaultSleepGuardrails()),
+		ExtraInstruction: strings.TrimSpace(policy.LLMExtraInstruction),
 	})
 	if err != nil {
 		return err
@@ -84,28 +84,3 @@ func scriptExcerpt(text string, maxWords int) string {
 	return strings.Join(words[:maxWords], " ")
 }
 
-func defaultSleepGuardrails() string {
-	return strings.TrimSpace(`
-STRICTLY FORBIDDEN CONTENT:
-1) Any language implying danger, threat, urgency, risk, harm, or fear.
-2) Any language implying disappearance, annihilation, endings, or being swallowed/consumed.
-3) Any existential/philosophical questions (no “what does it mean”, “who are you”, etc.).
-4) Any dramatic escalation, conflict, suspense, or intense surprises.
-5) Any wake-up instructions or commands directed at the listener.
-
-Examples of forbidden phrases (not exhaustive):
-- "the void consumes"
-- "you are disappearing"
-- "everything ends"
-- "nothing remains"
-- "darkness swallows"
-- "panic"
-- "terror"
-- "scream"
-- "blood"
-- "wake up"
-
-Self-correction requirement:
-Before returning the final script, scan your own output and rewrite any parts that violate the forbidden content rules.
-Return ONLY the final clean script. No analysis, no commentary.`)
-}

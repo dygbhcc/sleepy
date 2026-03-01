@@ -424,6 +424,16 @@ func qaRender(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QA
 		return report
 	}
 
+	// Decode the first 10s of video to catch corrupt H264 streams that
+	// ffprobe -show_format reports as valid (e.g. invalid NAL units).
+	if err := render.ProbeVideoIntegrity(ctx, deps.Render.FFmpegBin, videoAsset.Path); err != nil {
+		report.Pass = false
+		report.FailType = FailRenderFail
+		report.Checks = append(report.Checks, QACheck{Name: "video_integrity", Pass: false, Details: err.Error()})
+		return report
+	}
+	report.Checks = append(report.Checks, QACheck{Name: "video_integrity", Pass: true, Details: "decode check passed"})
+
 	audioAsset, err := deps.DB.GetAsset(ctx, run.ID, domain.AssetNarrationWAV)
 	if err != nil {
 		report.Pass = false

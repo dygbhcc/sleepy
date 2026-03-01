@@ -79,4 +79,13 @@ var defaultBannedPhrases = []string{
 	"battle",
 	"weapon",
 	"destroy",
+	"fear",
+	"rage",
+	"wound",
+	"shriek",
+	"jolt",
+	"alarm",
+	"collapse",
+	"danger",
+	"crash",
 }

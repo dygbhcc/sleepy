@@ -114,24 +114,28 @@ func scriptFixes() []FixPlan {
 				"llm_extra_instruction": "ABSOLUTE RULE: Do not use any word associated with tension, conflict, danger, or excitement. Every word must be maximally soft and peaceful.",
 			},
 		},
-		// PACING_FAIL: higher temperature for variety + anti-repetition.
+		// PACING_FAIL: higher temperature for variety + anti-repetition + word cap.
 		{
 			ID: "script_pacing_variety", Stage: domain.StatusPending,
 			FailType: FailPacingFail, Action: "retry",
 			TargetStatus: domain.StatusPending,
 			Overrides: map[string]any{
-				"llm_temperature":       0.8,
-				"llm_extra_instruction": "Vary your imagery and phrasing throughout. Never repeat a sentence or close paraphrase. Each paragraph must introduce fresh sensory details. Maintain a slow, drifting pace but with diverse vocabulary and scenes.",
+				"target_words_mode":       "max_capped",
+				"target_words_abs_buffer": 200,
+				"llm_temperature":         0.8,
+				"llm_extra_instruction":   "Vary your imagery and phrasing throughout. Never repeat a sentence or close paraphrase. Each paragraph must introduce fresh sensory details. Maintain a slow, drifting pace but with diverse vocabulary and scenes. IMPORTANT: Achieve variety by REPLACING repetitive content, not by adding more. Stay within the word limit.",
 			},
 		},
-		// PACING_FAIL (aggressive): maximize variety.
+		// PACING_FAIL (aggressive): maximize variety + word cap.
 		{
 			ID: "script_pacing_aggressive", Stage: domain.StatusPending,
 			FailType: FailPacingFail, Action: "retry",
 			TargetStatus: domain.StatusPending,
 			Overrides: map[string]any{
-				"llm_temperature":       0.9,
-				"llm_extra_instruction": "CRITICAL: The previous script had repetitive patterns. Every paragraph MUST use completely different imagery. No two paragraphs should describe similar scenes. Vary sentence length and structure throughout. Keep the calm, sleepy tone but maximize variety.",
+				"target_words_mode":       "max_capped",
+				"target_words_abs_buffer": 200,
+				"llm_temperature":         0.9,
+				"llm_extra_instruction":   "CRITICAL: The previous script had repetitive patterns. Every paragraph MUST use completely different imagery. No two paragraphs should describe similar scenes. Vary sentence length and structure. CRITICAL: Do NOT write more words to fix repetition. Write FEWER, more diverse paragraphs. Stay strictly within the word limit.",
 			},
 		},
 		// TITLE_INVALID: regenerate script + title.
