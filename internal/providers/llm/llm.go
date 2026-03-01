@@ -93,7 +93,16 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 		{Role: "user", Content: userPrompt},
 	}
 
-	raw, err := c.chatCompletionWithRetry(ctx, messages, req.Temperature)
+	// Compute a hard max_tokens ceiling to prevent runaway generation.
+	// The SSML section roughly doubles the markdown, and ~1.3 tokens per word.
+	// Use MaxWords if set, otherwise estimate from wordCount.
+	capWords := req.MaxWords
+	if capWords <= 0 {
+		capWords = wordCount
+	}
+	maxTokens := capWords * 3 // markdown + SSML + headroom
+
+	raw, err := c.chatCompletionWithRetry(ctx, messages, req.Temperature, maxTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -104,10 +113,10 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 // chatCompletionWithRetry wraps chatCompletion with transient-error retries
 // (429, 502, 503, 504) so the caller doesn't have to mix transient retries
 // with QA retries.
-func (c *Client) chatCompletionWithRetry(ctx context.Context, msgs []chatMsg, temperature float64) (string, error) {
+func (c *Client) chatCompletionWithRetry(ctx context.Context, msgs []chatMsg, temperature float64, maxTokens int) (string, error) {
 	const maxTransient = 4
 	for i := 0; i < maxTransient; i++ {
-		raw, err := c.chatCompletion(ctx, msgs, temperature)
+		raw, err := c.chatCompletion(ctx, msgs, temperature, maxTokens)
 		if err == nil {
 			return raw, nil
 		}
@@ -136,6 +145,7 @@ type chatReq struct {
 	Model       string    `json:"model"`
 	Messages    []chatMsg `json:"messages"`
 	Temperature float64   `json:"temperature"`
+	MaxTokens   int       `json:"max_tokens,omitempty"`
 }
 
 type chatResp struct {
@@ -149,7 +159,7 @@ type chatResp struct {
 	} `json:"error,omitempty"`
 }
 
-func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, temperature float64) (string, error) {
+func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, temperature float64, maxTokens int) (string, error) {
 	if temperature <= 0 {
 		temperature = 0.7
 	}
@@ -157,6 +167,7 @@ func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, temperature
 		Model:       c.cfg.Model,
 		Messages:    msgs,
 		Temperature: temperature,
+		MaxTokens:   maxTokens,
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
