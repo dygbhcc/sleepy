@@ -84,7 +84,7 @@ func (fe *FixEngine) DecideFix(
 
 	// Compute explicit TargetWords if requested.
 	if mode, ok := best.Overrides["target_words_mode"].(string); ok {
-		tw := computeTargetWords(mode, report, policy)
+		tw := computeTargetWords(mode, report, policy, best.Overrides)
 		if tw > 0 {
 			best.Overrides["llm_target_words"] = tw
 		}
@@ -206,12 +206,16 @@ func filterByDirection(candidates []FixPlan, report QAReport) []FixPlan {
 
 // --- TargetWords computation ---
 
-func computeTargetWords(mode string, report QAReport, policy Policy) int {
+func computeTargetWords(mode string, report QAReport, policy Policy, overrides map[string]any) int {
 	switch mode {
 	case "computed":
 		return computeTargetWordsFromWC(report, policy)
 	case "duration_derived":
 		return computeTargetWordsFromDuration(report, policy)
+	case "max_capped":
+		return computeTargetWordsMaxCapped(report, policy, overrides)
+	case "min_padded":
+		return computeTargetWordsMinPadded(report, policy, overrides)
 	default:
 		return 0
 	}
@@ -262,6 +266,56 @@ func computeTargetWordsFromDuration(report QAReport, policy Policy) int {
 	ratio := targetSec / actualSec
 	adjusted := int(float64(actualWords) * ratio)
 	return clamp(adjusted, policy.MinWords, policy.MaxWords*2) // allow wider range for duration fixes
+}
+
+// computeTargetWordsMaxCapped sets target to max_words - buffer for WORDCOUNT_HIGH fixes.
+// Uses max_words from QA diagnostics if available, otherwise falls back to policy.MaxWords.
+func computeTargetWordsMaxCapped(report QAReport, policy Policy, overrides map[string]any) int {
+	buf := 150
+	if b, ok := toInt(overrides["target_words_abs_buffer"]); ok && b > 0 {
+		buf = b
+	}
+
+	maxWords := policy.MaxWords
+	if diag := extractDiag(report, "wordcount"); diag != nil {
+		if mw := intFromDiag(diag, "max_words"); mw > 0 {
+			maxWords = mw
+		}
+	}
+
+	if maxWords <= 0 {
+		return 0
+	}
+	adjusted := maxWords - buf
+	if adjusted < policy.MinWords {
+		adjusted = policy.MinWords
+	}
+	return adjusted
+}
+
+// computeTargetWordsMinPadded sets target to min_words + buffer for WORDCOUNT_LOW fixes.
+// Uses min_words from QA diagnostics if available, otherwise falls back to policy.MinWords.
+func computeTargetWordsMinPadded(report QAReport, policy Policy, overrides map[string]any) int {
+	buf := 150
+	if b, ok := toInt(overrides["target_words_abs_buffer"]); ok && b > 0 {
+		buf = b
+	}
+
+	minWords := policy.MinWords
+	if diag := extractDiag(report, "wordcount"); diag != nil {
+		if mw := intFromDiag(diag, "min_words"); mw > 0 {
+			minWords = mw
+		}
+	}
+
+	if minWords <= 0 {
+		return 0
+	}
+	adjusted := minWords + buf
+	if policy.MaxWords > 0 && adjusted > policy.MaxWords {
+		adjusted = policy.MaxWords
+	}
+	return adjusted
 }
 
 // --- Diagnostic extraction helpers ---

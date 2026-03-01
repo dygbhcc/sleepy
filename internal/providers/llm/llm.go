@@ -37,6 +37,8 @@ type ScriptRequest struct {
 
 	// Override fields (set by fix engine; zero values = use defaults).
 	TargetWords      int     // explicit word target; 0 = derive from DurationMin
+	MinWords         int     // hard minimum word count; 0 = no constraint
+	MaxWords         int     // hard maximum word count; 0 = no constraint
 	Temperature      float64 // 0 = use default (0.7)
 	ExtraInstruction string  // appended to system prompt
 }
@@ -258,8 +260,15 @@ Series: {{.Series}}
 Episode: {{.Episode}}
 Style: {{.Style}}
 Language: {{.LangName}}
-Target: approximately {{.WordCount}} words ({{.DurationMin}} minutes at ~130 words per minute)
-
+{{if and .MinWords .MaxWords}}Hard range: {{.MinWords}}–{{.MaxWords}} words.
+Target: {{.WordCount}} words.
+HARD RULE:
+- Do NOT exceed {{.MaxWords}} words.
+- Do NOT go below {{.MinWords}} words.
+- When within range, STOP immediately.
+- Do not add extra sections after reaching range.
+{{else}}Target: approximately {{.WordCount}} words ({{.DurationMin}} minutes at ~130 words per minute)
+{{end}}
 IMPORTANT: Write the ENTIRE script in {{.LangName}}. Every sentence, paragraph, and word must be in {{.LangName}}.
 
 Style guide for "{{.Style}}":
@@ -277,6 +286,9 @@ Rules:
 - Gradual, dreamlike progression with no plot
 - Begin gently and let the imagery soften further as the script continues
 - End with a passage that fades into silence and stillness
+- Avoid verbatim repetition of sentences or paragraphs
+- Do not reuse full sentences; repetition must be subtle variation, not duplication
+- Maintain variety in imagery and phrasing; avoid looping patterns
 
 Formatting rules (STRICT):
 - Do NOT include any title, heading, or episode name in the script body
@@ -315,8 +327,8 @@ func buildPrompt(req ScriptRequest, wordCount int) (string, error) {
 	}
 	data := struct {
 		Series, Episode, Style, StyleGuide, LangName string
-		DurationMin, WordCount                       int
-	}{req.Series, req.Episode, req.Style, guide, langName, req.DurationMin, wordCount}
+		DurationMin, WordCount, MinWords, MaxWords   int
+	}{req.Series, req.Episode, req.Style, guide, langName, req.DurationMin, wordCount, req.MinWords, req.MaxWords}
 
 	var buf bytes.Buffer
 	if err := userTmpl.Execute(&buf, data); err != nil {

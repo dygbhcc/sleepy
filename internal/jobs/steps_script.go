@@ -20,6 +20,8 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 		Language:         run.Language,
 		DurationMin:      run.DurationMin,
 		TargetWords:      policy.TargetWords,
+		MinWords:         policy.MinWords,
+		MaxWords:         policy.MaxWords,
 		Temperature:      policy.LLMTemperature,
 		ExtraInstruction: strings.TrimSpace(policy.LLMExtraInstruction + "\n\n" + defaultSleepGuardrails()),
 	})

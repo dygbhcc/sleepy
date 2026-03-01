@@ -37,58 +37,61 @@ func (c *FixCatalog) CandidatesFor(stage domain.RunStatus, ft FailType) []FixPla
 
 func scriptFixes() []FixPlan {
 	return []FixPlan{
-		// WORDCOUNT_LOW: compute adjusted TargetWords from diagnostics.
+		// WORDCOUNT_LOW: set target to min_words + 150 via diag.
 		{
-			ID: "script_wc_low_computed", Stage: domain.StatusPending,
+			ID: "script_wc_low_min_padded", Stage: domain.StatusPending,
 			FailType: FailWordcountLow, Action: "retry",
 			TargetStatus: domain.StatusPending,
 			Overrides: map[string]any{
-				"target_words_mode":   "computed",
-				"target_words_buffer": 0.10,
-				"llm_temperature":     0.5,
+				"target_words_mode":       "min_padded",
+				"target_words_abs_buffer": 150,
+				"llm_temperature":         0.7,
 			},
 		},
-		// WORDCOUNT_LOW (aggressive): larger buffer.
+		// WORDCOUNT_LOW (aggressive): larger padding + expand instruction.
 		{
 			ID: "script_wc_low_aggressive", Stage: domain.StatusPending,
 			FailType: FailWordcountLow, Action: "retry",
 			TargetStatus: domain.StatusPending,
 			Overrides: map[string]any{
-				"target_words_mode":   "computed",
-				"target_words_buffer": 0.20,
-				"llm_temperature":     0.4,
+				"target_words_mode":       "min_padded",
+				"target_words_abs_buffer": 300,
+				"llm_temperature":         0.7,
+				"llm_extra_instruction":   "The previous script was too short. Expand descriptions, add more sensory detail, and use longer paragraphs.",
 			},
 		},
-		// WORDCOUNT_LOW (factor fallback): when no diag data.
+		// WORDCOUNT_LOW (factor fallback): when min_words diag is missing.
 		{
 			ID: "script_wc_low_factor", Stage: domain.StatusPending,
 			FailType: FailWordcountLow, Action: "retry",
 			TargetStatus: domain.StatusPending,
 			Overrides: map[string]any{
 				"llm_word_count_factor": 1.20,
-				"llm_temperature":       0.5,
+				"llm_temperature":       0.7,
 			},
 		},
-		// WORDCOUNT_HIGH: compute adjusted TargetWords.
+		// WORDCOUNT_HIGH: set target to max_words - 150 via diag.
 		{
-			ID: "script_wc_high_computed", Stage: domain.StatusPending,
+			ID: "script_wc_high_max_capped", Stage: domain.StatusPending,
 			FailType: FailWordcountHigh, Action: "retry",
 			TargetStatus: domain.StatusPending,
 			Overrides: map[string]any{
-				"target_words_mode":   "computed",
-				"target_words_buffer": 0.10,
-				"llm_temperature":     0.5,
+				"target_words_mode":       "max_capped",
+				"target_words_abs_buffer": 150,
+				"llm_temperature":         0.5,
+				"llm_extra_instruction":   "The previous script exceeded the word limit. REMOVE entire sections if needed. Be more concise. Stop writing when you reach the target word count. Hard cap at MaxWords.",
 			},
 		},
-		// WORDCOUNT_HIGH (aggressive).
+		// WORDCOUNT_HIGH (aggressive): larger buffer, lower temp, forceful instruction.
 		{
 			ID: "script_wc_high_aggressive", Stage: domain.StatusPending,
 			FailType: FailWordcountHigh, Action: "retry",
 			TargetStatus: domain.StatusPending,
 			Overrides: map[string]any{
-				"target_words_mode":   "computed",
-				"target_words_buffer": 0.20,
-				"llm_temperature":     0.3,
+				"target_words_mode":       "max_capped",
+				"target_words_abs_buffer": 250,
+				"llm_temperature":         0.3,
+				"llm_extra_instruction":   "CRITICAL: The script MUST be shorter. Drastically reduce paragraph count. REMOVE sections until within range. Every sentence must be essential. STOP IMMEDIATELY once within range. Do NOT add any content after reaching the word limit.",
 			},
 		},
 		// BANNED_PHRASE: lower temperature, extra safety instruction.
@@ -111,14 +114,24 @@ func scriptFixes() []FixPlan {
 				"llm_extra_instruction": "ABSOLUTE RULE: Do not use any word associated with tension, conflict, danger, or excitement. Every word must be maximally soft and peaceful.",
 			},
 		},
-		// PACING_FAIL: slow down.
+		// PACING_FAIL: higher temperature for variety + anti-repetition.
 		{
-			ID: "script_pacing_slow", Stage: domain.StatusPending,
+			ID: "script_pacing_variety", Stage: domain.StatusPending,
 			FailType: FailPacingFail, Action: "retry",
 			TargetStatus: domain.StatusPending,
 			Overrides: map[string]any{
-				"llm_temperature":       0.4,
-				"llm_extra_instruction": "Slow the pacing further. Use longer sentences with more pauses. Every paragraph should feel like drifting into sleep.",
+				"llm_temperature":       0.8,
+				"llm_extra_instruction": "Vary your imagery and phrasing throughout. Never repeat a sentence or close paraphrase. Each paragraph must introduce fresh sensory details. Maintain a slow, drifting pace but with diverse vocabulary and scenes.",
+			},
+		},
+		// PACING_FAIL (aggressive): maximize variety.
+		{
+			ID: "script_pacing_aggressive", Stage: domain.StatusPending,
+			FailType: FailPacingFail, Action: "retry",
+			TargetStatus: domain.StatusPending,
+			Overrides: map[string]any{
+				"llm_temperature":       0.9,
+				"llm_extra_instruction": "CRITICAL: The previous script had repetitive patterns. Every paragraph MUST use completely different imagery. No two paragraphs should describe similar scenes. Vary sentence length and structure throughout. Keep the calm, sleepy tone but maximize variety.",
 			},
 		},
 	}
