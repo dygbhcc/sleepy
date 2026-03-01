@@ -136,15 +136,19 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 
 	switch stage {
 	case domain.StatusPending:
-		_ = deps.DB.IncrementAttempt(ctx, run.ID, "script_attempt")
 		stepErr = stepScript(ctx, deps, run, policy)
+		if !isAuthError(stepErr) {
+			_ = deps.DB.IncrementAttempt(ctx, run.ID, "script_attempt")
+		}
 		if stepErr == nil {
 			report = qaScript(ctx, deps, run, policy)
 		}
 
 	case domain.StatusScripted:
-		_ = deps.DB.IncrementAttempt(ctx, run.ID, "voice_attempt")
 		stepErr = stepTTS(ctx, deps, run, policy)
+		if !isAuthError(stepErr) {
+			_ = deps.DB.IncrementAttempt(ctx, run.ID, "voice_attempt")
+		}
 		if stepErr == nil {
 			report = qaVoice(ctx, deps, run, policy)
 		}
@@ -156,15 +160,19 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 		}
 
 	case domain.StatusThumbnailed:
-		_ = deps.DB.IncrementAttempt(ctx, run.ID, "render_attempt")
 		stepErr = stepRender(ctx, deps, run, policy)
+		if !isAuthError(stepErr) {
+			_ = deps.DB.IncrementAttempt(ctx, run.ID, "render_attempt")
+		}
 		if stepErr == nil {
 			report = qaRender(ctx, deps, run, policy)
 		}
 
 	case domain.StatusRendered:
-		_ = deps.DB.IncrementAttempt(ctx, run.ID, "package_attempt")
 		stepErr = stepPackage(ctx, deps, run)
+		if !isAuthError(stepErr) {
+			_ = deps.DB.IncrementAttempt(ctx, run.ID, "package_attempt")
+		}
 		if stepErr == nil {
 			report = qaPackage(ctx, deps, run)
 		}
@@ -188,13 +196,15 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 	if stepErr != nil {
 		_ = deps.DB.UpdateRunLastError(ctx, run.ID, stepErr.Error())
 
-		if isTransientError(stepErr) {
+		// Auth errors (401) and transient errors: leave run in current status
+		// so it retries on next claim (after key is fixed or service recovers).
+		if isTransientError(stepErr) || isAuthError(stepErr) {
 			run, _ = deps.DB.GetRun(ctx, run.ID)
 			totalAttempts := run.ScriptAttempt + run.VoiceAttempt + run.RenderAttempt + run.PackageAttempt
 			if totalAttempts > 20 {
 				return deps.DB.SetNeedsReview(ctx, run.ID, fmt.Sprintf("transient error after %d total attempts: %v", totalAttempts, stepErr))
 			}
-			log.Printf("worker[%s]: transient error on run %s, will retry on next claim: %v", workerID, run.ID, stepErr)
+			log.Printf("worker[%s]: retryable error on run %s, will retry on next claim: %v", workerID, run.ID, stepErr)
 			return nil
 		}
 

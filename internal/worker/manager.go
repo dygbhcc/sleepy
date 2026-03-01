@@ -45,71 +45,26 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 	ffmpegBin := "ffmpeg"
 	ffprobeBin := "ffprobe"
 
-	var llmRouter llm.ScriptGenerator
 	var ttsProvider jobs.TTSSynthesizer
 
-	// Build LLM provider list with fallback order.
-	var llmProviders []llm.NamedProvider
-
-	// Groq provider (if key is set).
-	if settings.GroqAPIKey != "" {
-		baseURL := "https://api.groq.com/openai/v1"
-		model := "llama-3.3-70b-versatile"
-		if settings.Mode == "test" {
-			if settings.OpenAIBaseURL != "" {
-				baseURL = settings.OpenAIBaseURL
-			}
-			if settings.OpenAIModel != "" {
-				model = settings.OpenAIModel
-			}
-		}
-		llmProviders = append(llmProviders, llm.NamedProvider{
-			Name:   "groq",
-			Client: llm.NewClient(llm.Config{BaseURL: baseURL, APIKey: settings.GroqAPIKey, Model: model}),
-		})
+	if settings.OpenAIAPIKey == "" {
+		return fmt.Errorf("OpenAI API key is required")
 	}
 
-	// OpenAI provider (if key is set).
-	if settings.OpenAIAPIKey != "" {
-		baseURL := settings.OpenAIBaseURL
-		if baseURL == "" {
-			baseURL = "https://api.openai.com/v1"
-		}
-		model := settings.OpenAIModel
-		if model == "" {
-			if settings.Mode == "prod" {
-				model = "gpt-4o"
-			} else {
-				model = "gpt-4o-mini"
-			}
-		}
-		llmProviders = append(llmProviders, llm.NamedProvider{
-			Name:   "openai",
-			Client: llm.NewClient(llm.Config{BaseURL: baseURL, APIKey: settings.OpenAIAPIKey, Model: model}),
-		})
+	baseURL := settings.OpenAIBaseURL
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
 	}
-
-	// In prod mode, prefer OpenAI first.
-	if settings.Mode == "prod" && len(llmProviders) >= 2 {
-		// Swap so OpenAI is first.
-		for i, p := range llmProviders {
-			if p.Name == "openai" && i > 0 {
-				llmProviders[0], llmProviders[i] = llmProviders[i], llmProviders[0]
-				break
-			}
+	model := settings.OpenAIModel
+	if model == "" {
+		if settings.Mode == "prod" {
+			model = "gpt-4o"
+		} else {
+			model = "gpt-4o-mini"
 		}
 	}
-
-	if len(llmProviders) == 0 {
-		return fmt.Errorf("no LLM API keys configured")
-	}
-
-	names := make([]string, len(llmProviders))
-	for i, p := range llmProviders {
-		names[i] = p.Name
-	}
-	log.Printf("worker-manager: LLM fallback order: %v", names)
-	llmRouter = llm.NewRouter(llmProviders)
+	llmClient := llm.NewClient(llm.Config{BaseURL: baseURL, APIKey: settings.OpenAIAPIKey, Model: model})
+	log.Printf("worker-manager: LLM provider: openai (model=%s)", model)
 
 	switch settings.Mode {
 	case "prod":
@@ -168,7 +123,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 		},
 		DB:    m.db,
 		Store: storage.NewLocalFS(m.assetRoot),
-		LLM:   llmRouter,
+		LLM:   llmClient,
 		TTS:   ttsProvider,
 		Image: image.NewClient(image.Config{
 			FFmpegBin:      ffmpegBin,

@@ -222,7 +222,10 @@ tr:hover{background:var(--surface2);cursor:pointer}
             </div>
           </div>
         </details>
-        <button type="submit" class="btn btn-primary btn-block" data-i18n="create"></button>
+        <div style="display:flex;gap:8px">
+          <button type="submit" class="btn btn-primary" style="flex:1" data-i18n="create"></button>
+          <button type="button" class="btn" style="flex:1;background:var(--accent2,#6c5ce7);color:#fff" onclick="quickStart()">Quick Start (3)</button>
+        </div>
       </form>
     </div>
 
@@ -286,11 +289,15 @@ tr:hover{background:var(--surface2);cursor:pointer}
 
       <!-- Test mode fields -->
       <div id="testFields" class="settings-section">
-        <h3>Groq + Edge TTS</h3>
+        <h3>LLM + Edge TTS</h3>
         <div class="settings-grid">
           <div class="form-group settings-full">
-            <label>Groq API Key</label>
-            <input type="password" id="sGroqKey" placeholder="gsk_...">
+            <label>OpenAI API Key</label>
+            <input type="password" id="sTestOpenAIKey" placeholder="sk-...">
+          </div>
+          <div class="form-group">
+            <label>OpenAI Model</label>
+            <input type="text" id="sTestOpenAIModel" placeholder="gpt-4o-mini">
           </div>
           <div class="form-group">
             <label data-i18n="edgeVoice"></label>
@@ -435,7 +442,7 @@ const LANGS = {
     settings: 'Settings',
     settingsTitle: 'Worker Settings',
     modeLabel: 'Mode',
-    modeTest: 'Test (Groq + Edge TTS)',
+    modeTest: 'Test (Edge TTS)',
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Edge Voice',
     edgeRate: 'Edge Rate',
@@ -511,7 +518,7 @@ const LANGS = {
     settings: 'Ayarlar',
     settingsTitle: 'Worker Ayarlari',
     modeLabel: 'Mod',
-    modeTest: 'Test (Groq + Edge TTS)',
+    modeTest: 'Test (Edge TTS)',
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Edge Ses',
     edgeRate: 'Edge Hiz',
@@ -587,7 +594,7 @@ const LANGS = {
     settings: 'Configuracoes',
     settingsTitle: 'Configuracoes do Worker',
     modeLabel: 'Modo',
-    modeTest: 'Teste (Groq + Edge TTS)',
+    modeTest: 'Teste (Edge TTS)',
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Voz Edge',
     edgeRate: 'Taxa Edge',
@@ -663,7 +670,7 @@ const LANGS = {
     settings: 'Configuracion',
     settingsTitle: 'Configuracion del Worker',
     modeLabel: 'Modo',
-    modeTest: 'Prueba (Groq + Edge TTS)',
+    modeTest: 'Prueba (Edge TTS)',
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Voz Edge',
     edgeRate: 'Velocidad Edge',
@@ -739,7 +746,7 @@ const LANGS = {
     settings: 'Impostazioni',
     settingsTitle: 'Impostazioni Worker',
     modeLabel: 'Modalita',
-    modeTest: 'Test (Groq + Edge TTS)',
+    modeTest: 'Test (Edge TTS)',
     modeProd: 'Prod (OpenAI + ElevenLabs)',
     edgeVoice: 'Voce Edge',
     edgeRate: 'Velocita Edge',
@@ -977,17 +984,29 @@ document.getElementById('createForm').onsubmit=async(e)=>{
     series:adv?document.getElementById('fSeries').value.trim():'',
     style:adv?document.getElementById('fStyle').value:'',
     language:adv?document.getElementById('fLanguage').value:'',
-    duration_min:adv?(parseInt(document.getElementById('fDuration').value)||30):0
+    duration_min:adv?(parseInt(document.getElementById('fDuration').value)||3):0
   };
   try{
     const res=await fetch(API+'/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!res.ok)throw new Error((await res.json()).error);
     toast(t('runCreated'));
     document.getElementById('createForm').reset();
-    document.getElementById('fDuration').value='30';
+    document.getElementById('fDuration').value='3';
     fetchRuns();
   }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
 };
+
+async function quickStart(){
+  const lang=document.getElementById('fLanguage')?document.getElementById('fLanguage').value:'en';
+  const dur=parseInt(document.getElementById('fDuration').value)||3;
+  try{
+    const res=await fetch(API+'/api/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:3,language:lang,duration_min:dur})});
+    if(!res.ok)throw new Error((await res.json()).error);
+    const runs=await res.json();
+    toast(runs.length+' runs created!');
+    fetchRuns();
+  }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
+}
 
 // ==================== Detail modal ====================
 async function openDetail(id){
@@ -1291,7 +1310,8 @@ async function loadSettings(){
     const res=await fetch(API+'/api/settings');
     const s=await res.json();
     setSettingsMode(s.mode||'test');
-    document.getElementById('sGroqKey').value=s.groq_api_key||'';
+    document.getElementById('sTestOpenAIKey').value=s.openai_api_key||'';
+    document.getElementById('sTestOpenAIModel').value=s.openai_model||'gpt-4o-mini';
     document.getElementById('sOpenAIKey').value=s.openai_api_key||'';
     document.getElementById('sOpenAIBaseURL').value=s.openai_base_url||'';
     document.getElementById('sOpenAIModel').value=s.openai_model||'';
@@ -1310,10 +1330,9 @@ async function loadSettings(){
 async function saveSettings(){
   const body={
     mode:settingsMode,
-    groq_api_key:document.getElementById('sGroqKey').value,
-    openai_api_key:document.getElementById('sOpenAIKey').value,
-    openai_base_url:document.getElementById('sOpenAIBaseURL').value,
-    openai_model:document.getElementById('sOpenAIModel').value,
+    openai_api_key:settingsMode==='test'?document.getElementById('sTestOpenAIKey').value:document.getElementById('sOpenAIKey').value,
+    openai_base_url:settingsMode==='prod'?document.getElementById('sOpenAIBaseURL').value:'',
+    openai_model:settingsMode==='test'?document.getElementById('sTestOpenAIModel').value:document.getElementById('sOpenAIModel').value,
     elevenlabs_api_key:document.getElementById('sElevenKey').value,
     elevenlabs_voice_id:document.getElementById('sElevenVoiceID').value,
     elevenlabs_model_id:document.getElementById('sElevenModelID').value,

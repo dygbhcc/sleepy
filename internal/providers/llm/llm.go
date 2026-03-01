@@ -15,6 +15,11 @@ import (
 	"sleepy/internal/errs"
 )
 
+// ScriptGenerator is the interface consumed by the pipeline.
+type ScriptGenerator interface {
+	GenerateScript(ctx context.Context, req ScriptRequest) (*ScriptResult, error)
+}
+
 // Config holds OpenAI-compatible API settings.
 type Config struct {
 	BaseURL string // e.g. https://api.openai.com/v1
@@ -62,8 +67,9 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
-// GenerateScript calls the LLM, validates with the sleep-safe QA gate,
-// and retries up to 2 times on QA failure before returning an error.
+// GenerateScript calls the LLM and returns the result.
+// QA validation is handled externally by the pipeline's qaScript stage
+// and fix engine, which provide smarter retries with parameter adjustments.
 func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*ScriptResult, error) {
 	wordCount := req.DurationMin * 130
 	if req.TargetWords > 0 {
@@ -85,43 +91,12 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 		{Role: "user", Content: userPrompt},
 	}
 
-	const maxRetries = 2
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
-			log.Printf("llm: QA retry %d/%d", attempt, maxRetries)
-		}
-
-		raw, err := c.chatCompletionWithRetry(ctx, messages, req.Temperature)
-		if err != nil {
-			return nil, fmt.Errorf("llm call (attempt %d): %w", attempt+1, err)
-		}
-
-		result, err := parseScriptResponse(raw)
-		if err != nil {
-			return nil, fmt.Errorf("parse llm response: %w", err)
-		}
-
-		qa := RunQA(result.Markdown)
-		if qa.Pass {
-			log.Printf("llm: QA passed on attempt %d", attempt+1)
-			return result, nil
-		}
-
-		log.Printf("llm: QA failed on attempt %d: %s", attempt+1, strings.Join(qa.Failures, "; "))
-
-		feedback := fmt.Sprintf(
-			"The script did not pass the sleep-safety review. Issues found:\n%s\n\n"+
-				"Rewrite the entire script, strictly avoiding every listed issue. "+
-				"Keep it extremely calm and gentle throughout.",
-			strings.Join(qa.Failures, "\n"),
-		)
-		messages = append(messages,
-			chatMsg{Role: "assistant", Content: raw},
-			chatMsg{Role: "user", Content: feedback},
-		)
+	raw, err := c.chatCompletionWithRetry(ctx, messages, req.Temperature)
+	if err != nil {
+		return nil, err
 	}
 
-	return nil, fmt.Errorf("script failed QA gate after %d retries", maxRetries)
+	return parseScriptResponse(raw)
 }
 
 // chatCompletionWithRetry wraps chatCompletion with transient-error retries
@@ -208,12 +183,10 @@ func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, temperature
 	if resp.StatusCode != http.StatusOK {
 		baseErr := fmt.Errorf("api error (HTTP %d): %s", resp.StatusCode, truncate(string(respBody), 500))
 		// 429 can mean short rate-limit (transient) or quota/billing exhausted (permanent).
-		// Don't retry on quota, billing, or daily token limit errors.
+		// Only treat true quota/billing exhaustion as permanent.
 		if resp.StatusCode == 429 {
 			body := string(respBody)
-			if strings.Contains(body, "insufficient_quota") ||
-				strings.Contains(body, "tokens per day") ||
-				strings.Contains(body, "rate_limit_exceeded") {
+			if strings.Contains(body, "insufficient_quota") {
 				return "", baseErr // permanent — don't retry
 			}
 		}
@@ -305,8 +278,16 @@ Rules:
 - Begin gently and let the imagery soften further as the script continues
 - End with a passage that fades into silence and stillness
 
+Formatting rules (STRICT):
+- Do NOT include any title, heading, or episode name in the script body
+- Do NOT use markdown headers (#, ##, **bold**, etc.)
+- Do NOT use bullet points, numbered lists, or special formatting
+- Plain prose paragraphs only, separated by blank lines
+- No ellipsis (...), em-dashes (—), or decorative punctuation
+- Use only basic punctuation: periods, commas, and occasional semicolons
+
 Output format:
-First, output the full script in plain Markdown.
+First, output the script as plain prose paragraphs (no titles, no markdown).
 Then output a line containing exactly: ---SSML---
 Then output the same script wrapped in SSML with <break time="1s"/> tags between paragraphs. Wrap the entire SSML section in <speak> tags.`))
 
@@ -345,7 +326,16 @@ func buildPrompt(req ScriptRequest, wordCount int) (string, error) {
 }
 
 func parseScriptResponse(raw string) (*ScriptResult, error) {
-	parts := strings.SplitN(raw, "---SSML---", 2)
+	// Normalize separator variations the LLM may produce:
+	// "---\nSSML---", "---\n\nSSML---", "---SSML---" etc.
+	normalized := raw
+	for _, sep := range []string{"---\n\nSSML---", "---\nSSML---", "--- SSML ---", "---SSML ---"} {
+		if strings.Contains(normalized, sep) {
+			normalized = strings.Replace(normalized, sep, "---SSML---", 1)
+			break
+		}
+	}
+	parts := strings.SplitN(normalized, "---SSML---", 2)
 	md := strings.TrimSpace(parts[0])
 	if md == "" {
 		return nil, fmt.Errorf("empty markdown section in LLM response")

@@ -71,7 +71,6 @@ type WorkerSettings struct {
 	MaxInflightTTS       int    // max concurrent TTS workers (default 1)
 	MaxInflightRender    int    // max concurrent render workers (default 1)
 
-	GroqAPIKey        string
 	OpenAIAPIKey      string
 	OpenAIBaseURL     string
 	OpenAIModel       string

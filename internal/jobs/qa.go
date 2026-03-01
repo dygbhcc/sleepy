@@ -651,6 +651,17 @@ func isTransientError(err error) bool {
 	return errs.IsTransient(err)
 }
 
+// isAuthError returns true for authentication/authorization errors (HTTP 401/403).
+// These should not burn retry attempts — the run stays in its current status
+// and retries after the user fixes the API key.
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "HTTP 401") || strings.Contains(msg, "HTTP 403")
+}
+
 // --- Backoff helpers ---
 
 // sleepWithBackoff waits for an exponential backoff duration with jitter.

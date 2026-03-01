@@ -1,7 +1,6 @@
 CREATE TABLE IF NOT EXISTS worker_settings (
     id              INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     mode            TEXT NOT NULL DEFAULT 'test',
-    groq_api_key    TEXT NOT NULL DEFAULT '',
     openai_api_key  TEXT NOT NULL DEFAULT '',
     openai_base_url TEXT NOT NULL DEFAULT '',
     openai_model    TEXT NOT NULL DEFAULT '',

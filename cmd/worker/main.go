@@ -21,7 +21,7 @@ import (
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	// MODE: "test" (free: Groq + Edge TTS) or "prod" (OpenAI + ElevenLabs)
+	// MODE: "test" (OpenAI + Edge TTS) or "prod" (OpenAI + ElevenLabs)
 	mode := envOr("MODE", "test")
 
 	pgDSN := mustEnv("PG_DSN")
@@ -63,12 +63,12 @@ func main() {
 		})
 
 	default: // "test"
-		log.Println("=== MODE: test (Groq + Edge TTS) ===")
+		log.Println("=== MODE: test (OpenAI + Edge TTS) ===")
 
 		llmClient = llm.NewClient(llm.Config{
-			BaseURL: envOr("OPENAI_BASE_URL", "https://api.groq.com/openai/v1"),
-			APIKey:  mustEnv("GROQ_API_KEY"),
-			Model:   envOr("OPENAI_MODEL", "llama-3.3-70b-versatile"),
+			BaseURL: envOr("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+			APIKey:  mustEnv("OPENAI_API_KEY"),
+			Model:   envOr("OPENAI_MODEL", "gpt-4o-mini"),
 		})
 
 		ttsProvider = tts.NewEdgeClient(tts.EdgeConfig{

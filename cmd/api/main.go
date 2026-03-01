@@ -49,6 +49,7 @@ func main() {
 	// API
 	mux.HandleFunc("GET /api/runs", handleListRuns)
 	mux.HandleFunc("POST /api/runs", handleCreateRun)
+	mux.HandleFunc("POST /api/batch", handleBatchCreate)
 	mux.HandleFunc("GET /api/runs/{id}", handleGetRun)
 	mux.HandleFunc("DELETE /api/runs/{id}", handleDeleteRun)
 	mux.HandleFunc("POST /api/runs/{id}/retry", handleRetryRun)
@@ -151,6 +152,63 @@ func handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, run)
+}
+
+func handleBatchCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Count       int    `json:"count"`
+		Language    string `json:"language"`
+		DurationMin int    `json:"duration_min"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Count <= 0 {
+		req.Count = 3
+	}
+	if req.Count > 10 {
+		req.Count = 10
+	}
+	if req.Language == "" {
+		req.Language = "en"
+	}
+	if req.DurationMin <= 0 {
+		req.DurationMin = 3
+	}
+
+	// Find existing episode names to avoid duplicates.
+	existing, err := store.ListRuns(r.Context(), "")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	used := make(map[string]bool, len(existing))
+	for _, run := range existing {
+		used[run.Episode] = true
+	}
+
+	picks := pickEpisodes(req.Count, used)
+	if len(picks) == 0 {
+		writeErr(w, http.StatusConflict, "no unused episodes available in pool")
+		return
+	}
+
+	var created []domain.Run
+	for _, ep := range picks {
+		run, err := store.CreateRun(r.Context(), ep.Series, ep.Episode, ep.Style, req.Language, req.DurationMin)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := store.EnqueueJob(r.Context(), run.ID, jobs.JobTypeRunPipeline); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		created = append(created, *run)
+	}
+
+	writeJSON(w, http.StatusCreated, created)
 }
 
 func handleGetRun(w http.ResponseWriter, r *http.Request) {
@@ -404,7 +462,6 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mode":               s.Mode,
-		"groq_api_key":       maskKey(s.GroqAPIKey),
 		"openai_api_key":     maskKey(s.OpenAIAPIKey),
 		"openai_base_url":    s.OpenAIBaseURL,
 		"openai_model":       s.OpenAIModel,
@@ -422,7 +479,6 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Mode              *string  `json:"mode"`
-		GroqAPIKey        *string  `json:"groq_api_key"`
 		OpenAIAPIKey      *string  `json:"openai_api_key"`
 		OpenAIBaseURL     *string  `json:"openai_base_url"`
 		OpenAIModel       *string  `json:"openai_model"`
@@ -448,9 +504,6 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	if req.Mode != nil {
 		s.Mode = *req.Mode
-	}
-	if req.GroqAPIKey != nil && *req.GroqAPIKey != "" && !strings.HasPrefix(*req.GroqAPIKey, "***") {
-		s.GroqAPIKey = *req.GroqAPIKey
 	}
 	if req.OpenAIAPIKey != nil && *req.OpenAIAPIKey != "" && !strings.HasPrefix(*req.OpenAIAPIKey, "***") {
 		s.OpenAIAPIKey = *req.OpenAIAPIKey
@@ -498,8 +551,8 @@ func handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required API keys
-	if s.Mode == "test" && s.GroqAPIKey == "" {
-		writeErr(w, http.StatusBadRequest, "Groq API key is required for test mode")
+	if s.Mode == "test" && s.OpenAIAPIKey == "" {
+		writeErr(w, http.StatusBadRequest, "OpenAI API key is required for test mode")
 		return
 	}
 	if s.Mode == "prod" {

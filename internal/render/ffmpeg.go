@@ -61,7 +61,7 @@ func Render(ctx context.Context, cfg RenderConfig, imagePath, audioPath string, 
 		return renderWithMusic(ctx, cfg, imagePath, audioPath, audioDurSec, fadeStart, vFilter, outPath)
 	}
 	log.Println("render: no music, rendering narration only")
-	return renderSimple(ctx, cfg, imagePath, audioPath, fadeStart, vFilter, outPath)
+	return renderSimple(ctx, cfg, imagePath, audioPath, audioDurSec, fadeStart, vFilter, outPath)
 }
 
 // renderWithMusic mixes narration (full volume) + ambient music (MusicVol) then applies fade-out.
@@ -77,8 +77,10 @@ func renderWithMusic(ctx context.Context, cfg RenderConfig, imagePath, audioPath
 		fadeStart, cfg.FadeOutSec,
 	)
 
+	duration := fmt.Sprintf("%.2f", audioDurSec)
+
 	cmd := exec.CommandContext(ctx, cfg.FFmpegBin,
-		"-loop", "1", "-framerate", fmt.Sprintf("%d", OutputFPS), "-i", imagePath,
+		"-loop", "1", "-framerate", fmt.Sprintf("%d", OutputFPS), "-t", duration, "-i", imagePath,
 		"-i", audioPath,
 		"-i", cfg.MusicPath,
 		"-filter_complex", fc,
@@ -87,7 +89,6 @@ func renderWithMusic(ctx context.Context, cfg RenderConfig, imagePath, audioPath
 		"-pix_fmt", "yuv420p", "-tune", "stillimage",
 		"-preset", "medium", "-crf", "23",
 		"-c:a", "aac", "-b:a", "192k",
-		"-shortest",
 		"-movflags", "+faststart",
 		"-y", outPath,
 	)
@@ -100,11 +101,12 @@ func renderWithMusic(ctx context.Context, cfg RenderConfig, imagePath, audioPath
 }
 
 // renderSimple renders with narration only (no background music).
-func renderSimple(ctx context.Context, cfg RenderConfig, imagePath, audioPath string, fadeStart float64, vFilter, outPath string) error {
+func renderSimple(ctx context.Context, cfg RenderConfig, imagePath, audioPath string, audioDurSec, fadeStart float64, vFilter, outPath string) error {
 	aFilter := fmt.Sprintf("afade=t=out:st=%.2f:d=%.2f", fadeStart, cfg.FadeOutSec)
+	duration := fmt.Sprintf("%.2f", audioDurSec)
 
 	cmd := exec.CommandContext(ctx, cfg.FFmpegBin,
-		"-loop", "1", "-framerate", fmt.Sprintf("%d", OutputFPS), "-i", imagePath,
+		"-loop", "1", "-framerate", fmt.Sprintf("%d", OutputFPS), "-t", duration, "-i", imagePath,
 		"-i", audioPath,
 		"-vf", vFilter,
 		"-af", aFilter,
@@ -112,7 +114,6 @@ func renderSimple(ctx context.Context, cfg RenderConfig, imagePath, audioPath st
 		"-pix_fmt", "yuv420p", "-tune", "stillimage",
 		"-preset", "medium", "-crf", "23",
 		"-c:a", "aac", "-b:a", "192k",
-		"-shortest",
 		"-movflags", "+faststart",
 		"-y", outPath,
 	)
