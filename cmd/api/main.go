@@ -691,6 +691,20 @@ func handleUpdateThumbnail(w http.ResponseWriter, r *http.Request) {
 
 // ---------- YouTube ----------
 
+func findStyleThumbnail(style string) string {
+	prefix := strings.ToLower(style)
+	entries, err := os.ReadDir("assets/thumbnails")
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(strings.ToLower(e.Name()), prefix) {
+			return filepath.Join("assets/thumbnails", e.Name())
+		}
+	}
+	return ""
+}
+
 func getYouTubeClient(ctx context.Context) (*youtube.Client, error) {
 	s, err := store.GetWorkerSettings(ctx)
 	if err != nil {
@@ -794,11 +808,12 @@ func handleUploadYouTube(w http.ResponseWriter, r *http.Request) {
 		run.Series, run.Episode, run.Style)
 
 	videoID, err := yt.Upload(r.Context(), youtube.UploadRequest{
-		FilePath:    videoAsset.Path,
-		Title:       title,
-		Description: desc,
-		Tags:        []string{"sleep", "narration", "relaxation", run.Style, run.Series},
-		Privacy:     privacy,
+		FilePath:      videoAsset.Path,
+		Title:         title,
+		Description:   desc,
+		Tags:          []string{"sleep", "narration", "relaxation", run.Style, run.Series},
+		Privacy:       privacy,
+		ThumbnailPath: findStyleThumbnail(run.Style),
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

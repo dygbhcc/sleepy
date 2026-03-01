@@ -66,11 +66,12 @@ func (c *Client) HasToken(ctx context.Context) bool {
 
 // UploadRequest describes the video to upload.
 type UploadRequest struct {
-	FilePath    string
-	Title       string
-	Description string
-	Tags        []string
-	Privacy     string // "unlisted", "public", "private"
+	FilePath      string
+	Title         string
+	Description   string
+	Tags          []string
+	Privacy       string // "unlisted", "public", "private"
+	ThumbnailPath string // optional: path to thumbnail image
 }
 
 // Upload uploads a video to YouTube and returns the video ID.
@@ -134,5 +135,30 @@ func (c *Client) Upload(ctx context.Context, req UploadRequest) (string, error) 
 	}
 
 	log.Printf("youtube: uploaded %q → %s (took %s)", req.Title, resp.Id, time.Since(start).Round(time.Second))
+
+	// Set custom thumbnail if provided.
+	if req.ThumbnailPath != "" {
+		if err := setThumbnail(ctx, svc, resp.Id, req.ThumbnailPath); err != nil {
+			log.Printf("youtube: failed to set thumbnail for %s: %v", resp.Id, err)
+		}
+	}
+
 	return resp.Id, nil
+}
+
+func setThumbnail(ctx context.Context, svc *yt.Service, videoID, thumbPath string) error {
+	f, err := os.Open(thumbPath)
+	if err != nil {
+		return fmt.Errorf("open thumbnail: %w", err)
+	}
+	defer f.Close()
+
+	call := svc.Thumbnails.Set(videoID)
+	call.Media(f)
+	_, err = call.Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("thumbnails.set: %w", err)
+	}
+	log.Printf("youtube: thumbnail set for %s from %s", videoID, thumbPath)
+	return nil
 }

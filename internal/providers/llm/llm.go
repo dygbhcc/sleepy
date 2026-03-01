@@ -63,7 +63,7 @@ func NewClient(cfg Config) *Client {
 	}
 	return &Client{
 		cfg:  cfg,
-		http: &http.Client{Timeout: 180 * time.Second},
+		http: &http.Client{Timeout: 600 * time.Second},
 	}
 }
 
