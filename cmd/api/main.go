@@ -700,11 +700,7 @@ func handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required API keys
-	if s.Mode == "test" && s.OpenAIAPIKey == "" {
-		writeErr(w, http.StatusBadRequest, "OpenAI API key is required for test mode")
-		return
-	}
+	// Validate required API keys (from env vars).
 	if os.Getenv("OPENAI_API_KEY") == "" {
 		writeErr(w, http.StatusBadRequest, "OPENAI_API_KEY env var is required")
 		return

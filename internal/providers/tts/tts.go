@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"sleepy/internal/errs"
-	"os/exec"
-	"time"
 )
 
 // Config holds ElevenLabs API settings.
@@ -49,15 +52,23 @@ func NewClient(cfg Config) *Client {
 
 // SynthesizeWithOpts generates speech with per-call overrides from the fix engine.
 func (c *Client) SynthesizeWithOpts(ctx context.Context, text string, outPath string, speedFactor, stability, similarityBoost float64) error {
-	mp3Path := outPath + ".tmp.mp3"
-	if err := c.callAPIWithOpts(ctx, text, mp3Path, speedFactor, stability, similarityBoost); err != nil {
-		return fmt.Errorf("elevenlabs api: %w", err)
+	chunks := splitTextForTTS(text, maxCharsPerRequest)
+	if len(chunks) == 1 {
+		mp3Path := outPath + ".tmp.mp3"
+		if err := c.callAPIWithOpts(ctx, chunks[0], mp3Path, speedFactor, stability, similarityBoost); err != nil {
+			return fmt.Errorf("elevenlabs api: %w", err)
+		}
+		defer os.Remove(mp3Path)
+		if c.cfg.Normalize {
+			return c.convertAndNormalize(ctx, mp3Path, outPath)
+		}
+		return c.convertToWAV(ctx, mp3Path, outPath)
 	}
-	defer os.Remove(mp3Path)
-	if c.cfg.Normalize {
-		return c.convertAndNormalize(ctx, mp3Path, outPath)
-	}
-	return c.convertToWAV(ctx, mp3Path, outPath)
+
+	log.Printf("tts: text too long (%d chars), splitting into %d chunks", len(text), len(chunks))
+	return c.synthesizeChunked(ctx, chunks, outPath, func(ctx context.Context, chunk, path string) error {
+		return c.callAPIWithOpts(ctx, chunk, path, speedFactor, stability, similarityBoost)
+	})
 }
 
 func (c *Client) callAPIWithOpts(ctx context.Context, text, outPath string, speedFactor, stability, similarityBoost float64) error {
@@ -133,24 +144,25 @@ func (c *Client) callAPIWithOpts(ctx context.Context, text, outPath string, spee
 // Synthesize sends text (plain or SSML) to ElevenLabs, downloads MP3,
 // post-processes to 44100 Hz mono WAV. When Config.Normalize is true,
 // applies EBU R128 loudnorm (loudnorm=I=-16:TP=-1.5:LRA=11).
+// Long texts are automatically split into chunks under 10,000 chars.
 func (c *Client) Synthesize(ctx context.Context, text string, outPath string) error {
-	mp3Path := outPath + ".tmp.mp3"
-
-	if err := c.callAPI(ctx, text, mp3Path); err != nil {
-		return fmt.Errorf("elevenlabs api: %w", err)
-	}
-	defer os.Remove(mp3Path)
-
-	if c.cfg.Normalize {
-		if err := c.convertAndNormalize(ctx, mp3Path, outPath); err != nil {
-			return fmt.Errorf("convert+normalize: %w", err)
+	chunks := splitTextForTTS(text, maxCharsPerRequest)
+	if len(chunks) == 1 {
+		mp3Path := outPath + ".tmp.mp3"
+		if err := c.callAPI(ctx, chunks[0], mp3Path); err != nil {
+			return fmt.Errorf("elevenlabs api: %w", err)
 		}
-	} else {
-		if err := c.convertToWAV(ctx, mp3Path, outPath); err != nil {
-			return fmt.Errorf("convert to wav: %w", err)
+		defer os.Remove(mp3Path)
+		if c.cfg.Normalize {
+			return c.convertAndNormalize(ctx, mp3Path, outPath)
 		}
+		return c.convertToWAV(ctx, mp3Path, outPath)
 	}
-	return nil
+
+	log.Printf("tts: text too long (%d chars), splitting into %d chunks", len(text), len(chunks))
+	return c.synthesizeChunked(ctx, chunks, outPath, func(ctx context.Context, chunk, path string) error {
+		return c.callAPI(ctx, chunk, path)
+	})
 }
 
 // ---- ElevenLabs wire types ----
@@ -260,4 +272,115 @@ func truncateBytes(b []byte, n int) string {
 		return string(b)
 	}
 	return string(b[:n]) + "..."
+}
+
+// maxCharsPerRequest is the ElevenLabs text limit (10,000 chars).
+const maxCharsPerRequest = 9500 // leave some headroom
+
+// splitTextForTTS splits text into chunks that fit within the char limit,
+// breaking on paragraph boundaries (double newline), then sentence boundaries.
+func splitTextForTTS(text string, limit int) []string {
+	if len(text) <= limit {
+		return []string{text}
+	}
+
+	paragraphs := strings.Split(text, "\n\n")
+	var chunks []string
+	var current strings.Builder
+
+	for _, p := range paragraphs {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		// If adding this paragraph would exceed limit, flush current chunk.
+		if current.Len() > 0 && current.Len()+2+len(p) > limit {
+			chunks = append(chunks, strings.TrimSpace(current.String()))
+			current.Reset()
+		}
+		// If a single paragraph exceeds the limit, split by sentences.
+		if len(p) > limit {
+			if current.Len() > 0 {
+				chunks = append(chunks, strings.TrimSpace(current.String()))
+				current.Reset()
+			}
+			chunks = append(chunks, splitBySentences(p, limit)...)
+			continue
+		}
+		if current.Len() > 0 {
+			current.WriteString("\n\n")
+		}
+		current.WriteString(p)
+	}
+	if current.Len() > 0 {
+		chunks = append(chunks, strings.TrimSpace(current.String()))
+	}
+	return chunks
+}
+
+func splitBySentences(text string, limit int) []string {
+	sentences := strings.SplitAfter(text, ". ")
+	var chunks []string
+	var current strings.Builder
+
+	for _, s := range sentences {
+		if current.Len()+len(s) > limit && current.Len() > 0 {
+			chunks = append(chunks, strings.TrimSpace(current.String()))
+			current.Reset()
+		}
+		current.WriteString(s)
+	}
+	if current.Len() > 0 {
+		chunks = append(chunks, strings.TrimSpace(current.String()))
+	}
+	return chunks
+}
+
+// synthesizeChunked calls the TTS API for each chunk, saves individual MP3s,
+// then concatenates them into a single WAV output.
+func (c *Client) synthesizeChunked(ctx context.Context, chunks []string, outPath string, callFn func(context.Context, string, string) error) error {
+	tmpDir := filepath.Dir(outPath)
+	var mp3Parts []string
+	defer func() {
+		for _, p := range mp3Parts {
+			os.Remove(p)
+		}
+	}()
+
+	for i, chunk := range chunks {
+		mp3Path := filepath.Join(tmpDir, fmt.Sprintf("tts_chunk_%d.mp3", i))
+		log.Printf("tts: synthesizing chunk %d/%d (%d chars)", i+1, len(chunks), len(chunk))
+		if err := callFn(ctx, chunk, mp3Path); err != nil {
+			return fmt.Errorf("elevenlabs api chunk %d: %w", i+1, err)
+		}
+		mp3Parts = append(mp3Parts, mp3Path)
+	}
+
+	// Build ffmpeg concat file.
+	concatPath := filepath.Join(tmpDir, "tts_concat.txt")
+	defer os.Remove(concatPath)
+	var concatBuf strings.Builder
+	for _, p := range mp3Parts {
+		abs, _ := filepath.Abs(p)
+		fmt.Fprintf(&concatBuf, "file '%s'\n", abs)
+	}
+	if err := os.WriteFile(concatPath, []byte(concatBuf.String()), 0644); err != nil {
+		return fmt.Errorf("write concat file: %w", err)
+	}
+
+	// Concatenate all MP3s into single MP3, then convert to WAV.
+	mergedMP3 := outPath + ".merged.mp3"
+	defer os.Remove(mergedMP3)
+	cmd := exec.CommandContext(ctx, c.cfg.FFmpegBin,
+		"-f", "concat", "-safe", "0", "-i", concatPath,
+		"-c", "copy", "-y", mergedMP3,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("ffmpeg concat: %s: %w", truncateBytes(out, 300), err)
+	}
+
+	if c.cfg.Normalize {
+		return c.convertAndNormalize(ctx, mergedMP3, outPath)
+	}
+	return c.convertToWAV(ctx, mergedMP3, outPath)
 }

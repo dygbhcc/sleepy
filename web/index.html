@@ -365,9 +365,8 @@ tr:hover{background:var(--surface2);cursor:pointer}
             <label data-i18n="elevenVoiceId"></label>
             <div style="display:flex;gap:6px;align-items:center">
               <select id="sElevenVoiceID" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:13px">
-                <option value="">-- Load voices --</option>
+                <option value="">--</option>
               </select>
-              <button type="button" onclick="fetchVoices()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;white-space:nowrap" data-i18n="loadVoices">Load</button>
               <button type="button" id="btnPreviewVoice" onclick="previewVoice()" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:14px;cursor:pointer" title="Preview">&#9654;</button>
             </div>
           </div>
@@ -505,7 +504,6 @@ const LANGS = {
     openaiBaseUrl: 'Base URL',
     openaiModel: 'Model',
     elevenVoiceId: 'Voice',
-    loadVoices: 'Load',
     elevenModelId: 'Model ID',
     elevenSpeed: 'Speed',
     ambientTrack: 'Ambient Track',
@@ -583,7 +581,6 @@ const LANGS = {
     openaiBaseUrl: 'Base URL',
     openaiModel: 'Model',
     elevenVoiceId: 'Ses',
-    loadVoices: 'Yukle',
     elevenModelId: 'Model ID',
     elevenSpeed: 'Hiz',
     ambientTrack: 'Ortam Muzigi',
@@ -661,7 +658,6 @@ const LANGS = {
     openaiBaseUrl: 'URL Base',
     openaiModel: 'Modelo',
     elevenVoiceId: 'Voz',
-    loadVoices: 'Carregar',
     elevenModelId: 'ID do Modelo',
     elevenSpeed: 'Velocidade',
     ambientTrack: 'Musica Ambiente',
@@ -739,7 +735,6 @@ const LANGS = {
     openaiBaseUrl: 'URL Base',
     openaiModel: 'Modelo',
     elevenVoiceId: 'Voz',
-    loadVoices: 'Cargar',
     elevenModelId: 'ID de Modelo',
     elevenSpeed: 'Velocidad',
     ambientTrack: 'Musica Ambiental',
@@ -817,7 +812,6 @@ const LANGS = {
     openaiBaseUrl: 'URL Base',
     openaiModel: 'Modello',
     elevenVoiceId: 'Voce',
-    loadVoices: 'Carica',
     elevenModelId: 'ID Modello',
     elevenSpeed: 'Velocita',
     ambientTrack: 'Musica Ambiente',
@@ -1469,8 +1463,8 @@ async function loadSettings(){
     window._pendingVoiceID=s.elevenlabs_voice_id||'';
     if(s.elevenlabs_key_set){
       fetchVoices(s.elevenlabs_voice_id);
-      fetchModels(s.elevenlabs_model_id);
     }
+    fetchModels(s.elevenlabs_model_id);
     const speedVal=s.elevenlabs_speed||0.80;
     document.getElementById('sElevenSpeed').value=speedVal;
     document.getElementById('sElevenSpeedVal').textContent=parseFloat(speedVal).toFixed(2);

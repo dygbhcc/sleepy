@@ -21,7 +21,7 @@ bash scripts/dev-up.sh
 # 2. Set env vars
 export PG_DSN="postgres://sleepy:sleepy@localhost:5432/sleepy?sslmode=disable"
 export OPENAI_API_KEY="sk-..."
-export OPENAI_MODEL="gpt-4o-mini"              # optional, default gpt-4o
+export OPENAI_MODEL="gpt-4o"              # optional, default gpt-4o
 export OPENAI_BASE_URL="https://api.openai.com/v1"  # optional
 export ELEVENLABS_API_KEY="..."
 export ELEVENLABS_VOICE_ID="..."
