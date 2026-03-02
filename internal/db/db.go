@@ -559,7 +559,7 @@ func (d *DB) GetWorkerSettings(ctx context.Context) (*domain.WorkerSettings, err
 		        worker_mode, require_voice_approval, max_inflight_script, max_inflight_tts, max_inflight_render,
 		        openai_api_key, openai_base_url, openai_model,
 		        elevenlabs_api_key, elevenlabs_voice_id, elevenlabs_model_id, elevenlabs_speed,
-		        edge_voice, edge_rate, normalize,
+		        edge_voice, edge_rate, normalize, music_path,
 		        youtube_enabled, youtube_privacy, youtube_client_id, youtube_client_secret,
 		        youtube_access_token, youtube_refresh_token, youtube_token_expiry,
 		        updated_at
@@ -568,7 +568,7 @@ func (d *DB) GetWorkerSettings(ctx context.Context) (*domain.WorkerSettings, err
 		&s.WorkerMode, &s.RequireVoiceApproval, &s.MaxInflightScript, &s.MaxInflightTTS, &s.MaxInflightRender,
 		&s.OpenAIAPIKey, &s.OpenAIBaseURL, &s.OpenAIModel,
 		&s.ElevenLabsAPIKey, &s.ElevenLabsVoiceID, &s.ElevenLabsModelID, &s.ElevenLabsSpeed,
-		&s.EdgeVoice, &s.EdgeRate, &s.Normalize,
+		&s.EdgeVoice, &s.EdgeRate, &s.Normalize, &s.MusicPath,
 		&s.YouTubeEnabled, &s.YouTubePrivacy, &s.YouTubeClientID, &s.YouTubeClientSecret,
 		&s.YouTubeAccessToken, &s.YouTubeRefreshToken, &s.YouTubeTokenExpiry,
 		&s.UpdatedAt)
@@ -586,16 +586,16 @@ func (d *DB) SaveWorkerSettings(ctx context.Context, s *domain.WorkerSettings) e
 			worker_mode = $2, require_voice_approval = $3, max_inflight_script = $4, max_inflight_tts = $5, max_inflight_render = $6,
 			openai_api_key = $7, openai_base_url = $8, openai_model = $9,
 			elevenlabs_api_key = $10, elevenlabs_voice_id = $11, elevenlabs_model_id = $12, elevenlabs_speed = $13,
-			edge_voice = $14, edge_rate = $15, normalize = $16,
-			youtube_enabled = $17, youtube_privacy = $18, youtube_client_id = $19, youtube_client_secret = $20,
-			youtube_access_token = $21, youtube_refresh_token = $22, youtube_token_expiry = $23,
+			edge_voice = $14, edge_rate = $15, normalize = $16, music_path = $17,
+			youtube_enabled = $18, youtube_privacy = $19, youtube_client_id = $20, youtube_client_secret = $21,
+			youtube_access_token = $22, youtube_refresh_token = $23, youtube_token_expiry = $24,
 			updated_at = now()
 		 WHERE id = 1`,
 		s.Mode,
 		s.WorkerMode, s.RequireVoiceApproval, s.MaxInflightScript, s.MaxInflightTTS, s.MaxInflightRender,
 		s.OpenAIAPIKey, s.OpenAIBaseURL, s.OpenAIModel,
 		s.ElevenLabsAPIKey, s.ElevenLabsVoiceID, s.ElevenLabsModelID, s.ElevenLabsSpeed,
-		s.EdgeVoice, s.EdgeRate, s.Normalize,
+		s.EdgeVoice, s.EdgeRate, s.Normalize, s.MusicPath,
 		s.YouTubeEnabled, s.YouTubePrivacy, s.YouTubeClientID, s.YouTubeClientSecret,
 		s.YouTubeAccessToken, s.YouTubeRefreshToken, s.YouTubeTokenExpiry,
 	)

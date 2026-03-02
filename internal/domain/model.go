@@ -89,6 +89,7 @@ type WorkerSettings struct {
 	EdgeVoice         string
 	EdgeRate          string
 	Normalize         bool
+	MusicPath         string // path to ambient music file (empty = no music)
 
 	// YouTube upload
 	YouTubeEnabled      bool

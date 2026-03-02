@@ -26,6 +26,8 @@ header span.subtitle{color:var(--text2);font-size:14px}
 .settings-btn:hover{border-color:var(--accent);color:var(--accent)}
 .worker-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
 .worker-dot.on{background:var(--green)}.worker-dot.off{background:var(--text2)}
+.env-status{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:4px 10px;border-radius:6px}
+.env-status.set{color:var(--green);background:rgba(34,197,94,.1)}.env-status.unset{color:var(--red);background:rgba(239,68,68,.1)}
 
 /* Settings Modal */
 .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -287,14 +289,24 @@ tr:hover{background:var(--surface2);cursor:pointer}
         </div>
       </div>
 
+      <!-- API Keys (env vars) -->
+      <div class="settings-section">
+        <div class="settings-grid">
+          <div class="form-group">
+            <label>OPENAI_API_KEY</label>
+            <span id="envOpenAI" class="env-status"></span>
+          </div>
+          <div class="form-group">
+            <label>ELEVENLABS_API_KEY</label>
+            <span id="envElevenLabs" class="env-status"></span>
+          </div>
+        </div>
+      </div>
+
       <!-- Test mode fields -->
       <div id="testFields" class="settings-section">
         <h3>LLM + Edge TTS</h3>
         <div class="settings-grid">
-          <div class="form-group settings-full">
-            <label>OpenAI API Key</label>
-            <input type="password" id="sTestOpenAIKey" placeholder="sk-...">
-          </div>
           <div class="form-group">
             <label>OpenAI Model</label>
             <input type="text" id="sTestOpenAIModel" placeholder="gpt-4o-mini">
@@ -341,10 +353,6 @@ tr:hover{background:var(--surface2);cursor:pointer}
       <div id="prodFields" class="settings-section" style="display:none">
         <h3>OpenAI + ElevenLabs</h3>
         <div class="settings-grid">
-          <div class="form-group settings-full">
-            <label>OpenAI API Key</label>
-            <input type="password" id="sOpenAIKey" placeholder="sk-...">
-          </div>
           <div class="form-group">
             <label data-i18n="openaiBaseUrl"></label>
             <input type="text" id="sOpenAIBaseURL" placeholder="https://api.openai.com/v1">
@@ -353,17 +361,21 @@ tr:hover{background:var(--surface2);cursor:pointer}
             <label data-i18n="openaiModel"></label>
             <input type="text" id="sOpenAIModel" placeholder="gpt-4o">
           </div>
-          <div class="form-group settings-full">
-            <label>ElevenLabs API Key</label>
-            <input type="password" id="sElevenKey" placeholder="xi-...">
-          </div>
           <div class="form-group">
             <label data-i18n="elevenVoiceId"></label>
-            <input type="text" id="sElevenVoiceID">
+            <div style="display:flex;gap:6px;align-items:center">
+              <select id="sElevenVoiceID" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:13px">
+                <option value="">-- Load voices --</option>
+              </select>
+              <button type="button" onclick="fetchVoices()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;white-space:nowrap" data-i18n="loadVoices">Load</button>
+              <button type="button" id="btnPreviewVoice" onclick="previewVoice()" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:14px;cursor:pointer" title="Preview">&#9654;</button>
+            </div>
           </div>
           <div class="form-group">
             <label data-i18n="elevenModelId"></label>
-            <input type="text" id="sElevenModelID" placeholder="eleven_monolingual_v1">
+            <select id="sElevenModelID" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:13px">
+              <option value="eleven_monolingual_v1">eleven_monolingual_v1</option>
+            </select>
           </div>
           <div class="form-group">
             <label><span data-i18n="elevenSpeed"></span>: <span id="sElevenSpeedVal">0.80</span></label>
@@ -372,8 +384,14 @@ tr:hover{background:var(--surface2);cursor:pointer}
         </div>
       </div>
 
-      <!-- Common -->
+      <!-- Audio -->
       <div class="settings-section">
+        <div class="form-group" style="margin-bottom:12px">
+          <label data-i18n="ambientTrack">Ambient Track</label>
+          <select id="sAmbientTrack" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:13px">
+            <option value="">None (no background music)</option>
+          </select>
+        </div>
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
           <input type="checkbox" id="sNormalize" checked>
           <span data-i18n="normalizeAudio"></span>
@@ -486,9 +504,11 @@ const LANGS = {
     edgeRateNormal: 'Normal',
     openaiBaseUrl: 'Base URL',
     openaiModel: 'Model',
-    elevenVoiceId: 'Voice ID',
+    elevenVoiceId: 'Voice',
+    loadVoices: 'Load',
     elevenModelId: 'Model ID',
     elevenSpeed: 'Speed',
+    ambientTrack: 'Ambient Track',
     normalizeAudio: 'Normalize audio (EBU R128)',
     saveSettings: 'Save Settings',
     settingsSaved: 'Settings saved!',
@@ -562,9 +582,11 @@ const LANGS = {
     edgeRateNormal: 'Normal',
     openaiBaseUrl: 'Base URL',
     openaiModel: 'Model',
-    elevenVoiceId: 'Ses ID',
+    elevenVoiceId: 'Ses',
+    loadVoices: 'Yukle',
     elevenModelId: 'Model ID',
     elevenSpeed: 'Hiz',
+    ambientTrack: 'Ortam Muzigi',
     normalizeAudio: 'Ses normalizasyonu (EBU R128)',
     saveSettings: 'Ayarlari Kaydet',
     settingsSaved: 'Ayarlar kaydedildi!',
@@ -638,9 +660,11 @@ const LANGS = {
     edgeRateNormal: 'Normal',
     openaiBaseUrl: 'URL Base',
     openaiModel: 'Modelo',
-    elevenVoiceId: 'ID da Voz',
+    elevenVoiceId: 'Voz',
+    loadVoices: 'Carregar',
     elevenModelId: 'ID do Modelo',
     elevenSpeed: 'Velocidade',
+    ambientTrack: 'Musica Ambiente',
     normalizeAudio: 'Normalizar audio (EBU R128)',
     saveSettings: 'Salvar Configuracoes',
     settingsSaved: 'Configuracoes salvas!',
@@ -714,9 +738,11 @@ const LANGS = {
     edgeRateNormal: 'Normal',
     openaiBaseUrl: 'URL Base',
     openaiModel: 'Modelo',
-    elevenVoiceId: 'ID de Voz',
+    elevenVoiceId: 'Voz',
+    loadVoices: 'Cargar',
     elevenModelId: 'ID de Modelo',
     elevenSpeed: 'Velocidad',
+    ambientTrack: 'Musica Ambiental',
     normalizeAudio: 'Normalizar audio (EBU R128)',
     saveSettings: 'Guardar Configuracion',
     settingsSaved: 'Configuracion guardada!',
@@ -790,9 +816,11 @@ const LANGS = {
     edgeRateNormal: 'Normale',
     openaiBaseUrl: 'URL Base',
     openaiModel: 'Modello',
-    elevenVoiceId: 'ID Voce',
+    elevenVoiceId: 'Voce',
+    loadVoices: 'Carica',
     elevenModelId: 'ID Modello',
     elevenSpeed: 'Velocita',
+    ambientTrack: 'Musica Ambiente',
     normalizeAudio: 'Normalizza audio (EBU R128)',
     saveSettings: 'Salva Impostazioni',
     settingsSaved: 'Impostazioni salvate!',
@@ -1343,6 +1371,80 @@ function openSettings(){
   loadSettings();
 }
 function closeSettings(){document.getElementById('settingsOverlay').style.display='none'}
+function setEnvStatus(id,isSet){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.className='env-status '+(isSet?'set':'unset');
+  el.textContent=isSet?'Set':'Not set (export in shell)';
+}
+
+let _voicePreviewAudio=null;
+async function fetchVoices(selectID){
+  const sel=document.getElementById('sElevenVoiceID');
+  sel.innerHTML='<option value="">Loading...</option>';
+  try{
+    const res=await fetch(API+'/api/elevenlabs/voices');
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const voices=await res.json();
+    sel.innerHTML='<option value="">-- Select voice --</option>';
+    window._voicePreviews={};
+    voices.forEach(v=>{
+      const opt=document.createElement('option');
+      opt.value=v.voice_id;
+      opt.textContent=v.name+(v.category?' ('+v.category+')':'');
+      sel.appendChild(opt);
+      if(v.preview_url)window._voicePreviews[v.voice_id]=v.preview_url;
+    });
+    const toSelect=selectID||window._pendingVoiceID||'';
+    if(toSelect)sel.value=toSelect;
+  }catch(e){
+    console.error('fetchVoices:',e);
+    sel.innerHTML='<option value="">Error loading voices</option>';
+    const vid=window._pendingVoiceID||'';
+    if(vid){const o=document.createElement('option');o.value=vid;o.textContent=vid;sel.appendChild(o);sel.value=vid;}
+  }
+}
+
+function previewVoice(){
+  const vid=document.getElementById('sElevenVoiceID').value;
+  if(!vid||!window._voicePreviews||!window._voicePreviews[vid])return;
+  if(_voicePreviewAudio){_voicePreviewAudio.pause();_voicePreviewAudio=null;}
+  _voicePreviewAudio=new Audio(window._voicePreviews[vid]);
+  _voicePreviewAudio.play();
+}
+
+async function fetchModels(selectID){
+  const sel=document.getElementById('sElevenModelID');
+  try{
+    const res=await fetch(API+'/api/elevenlabs/models');
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const models=await res.json();
+    sel.innerHTML='';
+    models.forEach(m=>{
+      const opt=document.createElement('option');
+      opt.value=m.model_id;
+      opt.textContent=m.name||m.model_id;
+      sel.appendChild(opt);
+    });
+    if(selectID)sel.value=selectID;
+  }catch(e){console.error('fetchModels:',e)}
+}
+
+async function fetchMusic(selectPath){
+  const sel=document.getElementById('sAmbientTrack');
+  try{
+    const res=await fetch(API+'/api/music');
+    const files=await res.json();
+    sel.innerHTML='<option value="">None (no background music)</option>';
+    files.forEach(f=>{
+      const opt=document.createElement('option');
+      opt.value=f.path;
+      opt.textContent=f.name;
+      sel.appendChild(opt);
+    });
+    if(selectPath)sel.value=selectPath;
+  }catch(e){console.error('fetchMusic:',e)}
+}
 
 function setSettingsMode(mode){
   settingsMode=mode;
@@ -1357,20 +1459,26 @@ async function loadSettings(){
     const res=await fetch(API+'/api/settings');
     const s=await res.json();
     setSettingsMode(s.mode||'test');
-    document.getElementById('sTestOpenAIKey').value=s.openai_api_key||'';
+    // Show env var status
+    setEnvStatus('envOpenAI',s.openai_key_set);
+    setEnvStatus('envElevenLabs',s.elevenlabs_key_set);
     document.getElementById('sTestOpenAIModel').value=s.openai_model||'gpt-4o-mini';
-    document.getElementById('sOpenAIKey').value=s.openai_api_key||'';
     document.getElementById('sOpenAIBaseURL').value=s.openai_base_url||'';
     document.getElementById('sOpenAIModel').value=s.openai_model||'';
-    document.getElementById('sElevenKey').value=s.elevenlabs_api_key||'';
-    document.getElementById('sElevenVoiceID').value=s.elevenlabs_voice_id||'';
-    document.getElementById('sElevenModelID').value=s.elevenlabs_model_id||'';
+    // Store voice_id so we can set it after fetching voices.
+    window._pendingVoiceID=s.elevenlabs_voice_id||'';
+    if(s.elevenlabs_key_set){
+      fetchVoices(s.elevenlabs_voice_id);
+      fetchModels(s.elevenlabs_model_id);
+    }
     const speedVal=s.elevenlabs_speed||0.80;
     document.getElementById('sElevenSpeed').value=speedVal;
     document.getElementById('sElevenSpeedVal').textContent=parseFloat(speedVal).toFixed(2);
     if(s.edge_voice)document.getElementById('sEdgeVoice').value=s.edge_voice;
     if(s.edge_rate)document.getElementById('sEdgeRate').value=s.edge_rate;
     document.getElementById('sNormalize').checked=s.normalize!==false;
+    // Load ambient tracks
+    fetchMusic(s.music_path||'');
     // YouTube
     document.getElementById('sYouTubeEnabled').checked=!!s.youtube_enabled;
     document.getElementById('sYTClientID').value=s.youtube_client_id||'';
@@ -1383,16 +1491,15 @@ async function loadSettings(){
 async function saveSettings(){
   const body={
     mode:settingsMode,
-    openai_api_key:settingsMode==='test'?document.getElementById('sTestOpenAIKey').value:document.getElementById('sOpenAIKey').value,
     openai_base_url:settingsMode==='prod'?document.getElementById('sOpenAIBaseURL').value:'',
     openai_model:settingsMode==='test'?document.getElementById('sTestOpenAIModel').value:document.getElementById('sOpenAIModel').value,
-    elevenlabs_api_key:document.getElementById('sElevenKey').value,
     elevenlabs_voice_id:document.getElementById('sElevenVoiceID').value,
     elevenlabs_model_id:document.getElementById('sElevenModelID').value,
     elevenlabs_speed:parseFloat(document.getElementById('sElevenSpeed').value)||0.80,
     edge_voice:document.getElementById('sEdgeVoice').value,
     edge_rate:document.getElementById('sEdgeRate').value,
     normalize:document.getElementById('sNormalize').checked,
+    music_path:document.getElementById('sAmbientTrack').value,
     youtube_enabled:document.getElementById('sYouTubeEnabled').checked,
     youtube_privacy:document.getElementById('sYTPrivacy').value,
     youtube_client_id:document.getElementById('sYTClientID').value,

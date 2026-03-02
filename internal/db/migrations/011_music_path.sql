@@ -1,0 +1,1 @@
+ALTER TABLE worker_settings ADD COLUMN IF NOT EXISTS music_path TEXT NOT NULL DEFAULT '';

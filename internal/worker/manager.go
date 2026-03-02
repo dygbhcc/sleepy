@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -48,8 +49,9 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 
 	var ttsProvider jobs.TTSSynthesizer
 
-	if settings.OpenAIAPIKey == "" {
-		return fmt.Errorf("OpenAI API key is required")
+	openaiKey := os.Getenv("OPENAI_API_KEY")
+	if openaiKey == "" {
+		return fmt.Errorf("OPENAI_API_KEY env var is required")
 	}
 
 	baseURL := settings.OpenAIBaseURL
@@ -64,7 +66,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 			model = "gpt-4o-mini"
 		}
 	}
-	llmClient := llm.NewClient(llm.Config{BaseURL: baseURL, APIKey: settings.OpenAIAPIKey, Model: model})
+	llmClient := llm.NewClient(llm.Config{BaseURL: baseURL, APIKey: openaiKey, Model: model})
 	log.Printf("worker-manager: LLM provider: openai (model=%s)", model)
 
 	switch settings.Mode {
@@ -79,8 +81,12 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 		if modelID == "" {
 			modelID = "eleven_monolingual_v1"
 		}
+		elevenKey := os.Getenv("ELEVENLABS_API_KEY")
+		if elevenKey == "" {
+			return fmt.Errorf("ELEVENLABS_API_KEY env var is required for prod mode")
+		}
 		ttsProvider = tts.NewClient(tts.Config{
-			APIKey:    settings.ElevenLabsAPIKey,
+			APIKey:    elevenKey,
 			VoiceID:   settings.ElevenLabsVoiceID,
 			ModelID:   modelID,
 			Speed:     speed,
@@ -134,7 +140,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 			FFmpegBin:  ffmpegBin,
 			FFprobeBin: ffprobeBin,
 			FadeOutSec: 5.0,
-			MusicPath:  "assets/music/breakzstudios-calm-of-the-cosmos-165862.mp3",
+			MusicPath:  settings.MusicPath,
 			MusicVol:   0.5,
 		},
 		FixEngine: jobs.NewFixEngine(outcomes),

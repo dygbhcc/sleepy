@@ -61,6 +61,9 @@ func main() {
 	mux.HandleFunc("GET /api/runs/{id}/script", handleGetScript)
 	mux.HandleFunc("PUT /api/runs/{id}/script", handleUpdateScript)
 	mux.HandleFunc("PUT /api/runs/{id}/thumbnail", handleUpdateThumbnail)
+	mux.HandleFunc("GET /api/elevenlabs/voices", handleElevenLabsVoices)
+	mux.HandleFunc("GET /api/elevenlabs/models", handleElevenLabsModels)
+	mux.HandleFunc("GET /api/music", handleListMusic)
 	mux.HandleFunc("GET /api/settings", handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", handleUpdateSettings)
 	mux.HandleFunc("POST /api/worker/start", handleWorkerStart)
@@ -478,6 +481,111 @@ func maskKey(key string) string {
 	return strings.Repeat("*", len(key)-4) + key[len(key)-4:]
 }
 
+// handleElevenLabsVoices proxies the ElevenLabs voices API to list available voices.
+func handleElevenLabsVoices(w http.ResponseWriter, r *http.Request) {
+	// Use API key from environment variable.
+	apiKey := os.Getenv("ELEVENLABS_API_KEY")
+	if apiKey == "" {
+		writeErr(w, http.StatusBadRequest, "ElevenLabs API key required")
+		return
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), "GET",
+		"https://api.elevenlabs.io/v2/voices?page_size=100", nil)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	req.Header.Set("xi-api-key", apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "ElevenLabs API error: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		writeErr(w, resp.StatusCode, "ElevenLabs: "+string(body))
+		return
+	}
+
+	var result struct {
+		Voices []struct {
+			VoiceID    string `json:"voice_id"`
+			Name       string `json:"name"`
+			Category   string `json:"category"`
+			PreviewURL string `json:"preview_url"`
+		} `json:"voices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		writeErr(w, http.StatusInternalServerError, "decode voices: "+err.Error())
+		return
+	}
+
+	type voice struct {
+		VoiceID    string `json:"voice_id"`
+		Name       string `json:"name"`
+		Category   string `json:"category"`
+		PreviewURL string `json:"preview_url"`
+	}
+	voices := make([]voice, len(result.Voices))
+	for i, v := range result.Voices {
+		voices[i] = voice{v.VoiceID, v.Name, v.Category, v.PreviewURL}
+	}
+	writeJSON(w, http.StatusOK, voices)
+}
+
+// handleElevenLabsModels returns the known ElevenLabs TTS models.
+func handleElevenLabsModels(w http.ResponseWriter, r *http.Request) {
+	type model struct {
+		ModelID string `json:"model_id"`
+		Name    string `json:"name"`
+	}
+	result := []model{
+		{"eleven_multilingual_v2", "Eleven Multilingual v2"},
+		{"eleven_turbo_v2_5", "Eleven Turbo v2.5"},
+		{"eleven_turbo_v2", "Eleven Turbo v2"},
+		{"eleven_monolingual_v1", "Eleven English v1"},
+		{"eleven_multilingual_v1", "Eleven Multilingual v1"},
+	}
+	if result == nil {
+		result = []model{}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleListMusic lists audio files in assets/music/.
+func handleListMusic(w http.ResponseWriter, r *http.Request) {
+	const musicDir = "assets/music"
+	entries, err := os.ReadDir(musicDir)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+
+	type musicFile struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	var files []musicFile
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		lower := strings.ToLower(name)
+		if strings.HasSuffix(lower, ".mp3") || strings.HasSuffix(lower, ".wav") || strings.HasSuffix(lower, ".ogg") {
+			files = append(files, musicFile{Name: name, Path: musicDir + "/" + name})
+		}
+	}
+	if files == nil {
+		files = []musicFile{}
+	}
+	writeJSON(w, http.StatusOK, files)
+}
+
 func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	s, err := store.GetWorkerSettings(r.Context())
 	if err != nil {
@@ -486,16 +594,17 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mode":               s.Mode,
-		"openai_api_key":     maskKey(s.OpenAIAPIKey),
+		"openai_key_set":     os.Getenv("OPENAI_API_KEY") != "",
 		"openai_base_url":    s.OpenAIBaseURL,
 		"openai_model":       s.OpenAIModel,
-		"elevenlabs_api_key": maskKey(s.ElevenLabsAPIKey),
+		"elevenlabs_key_set": os.Getenv("ELEVENLABS_API_KEY") != "",
 		"elevenlabs_voice_id": s.ElevenLabsVoiceID,
 		"elevenlabs_model_id": s.ElevenLabsModelID,
 		"elevenlabs_speed":   s.ElevenLabsSpeed,
 		"edge_voice":         s.EdgeVoice,
 		"edge_rate":          s.EdgeRate,
 		"normalize":              s.Normalize,
+		"music_path":             s.MusicPath,
 		"youtube_enabled":         s.YouTubeEnabled,
 		"youtube_privacy":         s.YouTubePrivacy,
 		"youtube_client_id":       s.YouTubeClientID,
@@ -508,16 +617,15 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Mode              *string  `json:"mode"`
-		OpenAIAPIKey      *string  `json:"openai_api_key"`
 		OpenAIBaseURL     *string  `json:"openai_base_url"`
 		OpenAIModel       *string  `json:"openai_model"`
-		ElevenLabsAPIKey  *string  `json:"elevenlabs_api_key"`
 		ElevenLabsVoiceID *string  `json:"elevenlabs_voice_id"`
 		ElevenLabsModelID *string  `json:"elevenlabs_model_id"`
 		ElevenLabsSpeed   *float64 `json:"elevenlabs_speed"`
 		EdgeVoice            *string  `json:"edge_voice"`
 		EdgeRate             *string  `json:"edge_rate"`
 		Normalize            *bool    `json:"normalize"`
+		MusicPath            *string  `json:"music_path"`
 		YouTubeEnabled       *bool    `json:"youtube_enabled"`
 		YouTubePrivacy       *string  `json:"youtube_privacy"`
 		YouTubeClientID      *string  `json:"youtube_client_id"`
@@ -538,17 +646,11 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if req.Mode != nil {
 		s.Mode = *req.Mode
 	}
-	if req.OpenAIAPIKey != nil && *req.OpenAIAPIKey != "" && !strings.HasPrefix(*req.OpenAIAPIKey, "***") {
-		s.OpenAIAPIKey = *req.OpenAIAPIKey
-	}
 	if req.OpenAIBaseURL != nil {
 		s.OpenAIBaseURL = *req.OpenAIBaseURL
 	}
 	if req.OpenAIModel != nil {
 		s.OpenAIModel = *req.OpenAIModel
-	}
-	if req.ElevenLabsAPIKey != nil && *req.ElevenLabsAPIKey != "" && !strings.HasPrefix(*req.ElevenLabsAPIKey, "***") {
-		s.ElevenLabsAPIKey = *req.ElevenLabsAPIKey
 	}
 	if req.ElevenLabsVoiceID != nil {
 		s.ElevenLabsVoiceID = *req.ElevenLabsVoiceID
@@ -567,6 +669,9 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Normalize != nil {
 		s.Normalize = *req.Normalize
+	}
+	if req.MusicPath != nil {
+		s.MusicPath = *req.MusicPath
 	}
 	if req.YouTubeEnabled != nil {
 		s.YouTubeEnabled = *req.YouTubeEnabled
@@ -600,13 +705,13 @@ func handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "OpenAI API key is required for test mode")
 		return
 	}
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		writeErr(w, http.StatusBadRequest, "OPENAI_API_KEY env var is required")
+		return
+	}
 	if s.Mode == "prod" {
-		if s.OpenAIAPIKey == "" {
-			writeErr(w, http.StatusBadRequest, "OpenAI API key is required for prod mode")
-			return
-		}
-		if s.ElevenLabsAPIKey == "" {
-			writeErr(w, http.StatusBadRequest, "ElevenLabs API key is required for prod mode")
+		if os.Getenv("ELEVENLABS_API_KEY") == "" {
+			writeErr(w, http.StatusBadRequest, "ELEVENLABS_API_KEY env var is required for prod mode")
 			return
 		}
 		if s.ElevenLabsVoiceID == "" {
