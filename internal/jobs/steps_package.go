@@ -65,11 +65,7 @@ func buildMetadata(run *domain.Run) episodeMetadata {
 		theme = theme[:40]
 	}
 
-	title := run.Title
-	if title == "" {
-		title = fmt.Sprintf("Quiet Orbit | %s — %s (Deep Sleep, %d min)",
-			run.Series, theme, run.DurationMin)
-	}
+	title := fmt.Sprintf("Deep Sleep Story | %s - %s", run.Style, run.Episode)
 
 	description := fmt.Sprintf(`%s — %s
 

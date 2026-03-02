@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"sleepy/internal/domain"
 	"sleepy/internal/providers/youtube"
+	"sleepy/internal/render"
 )
 
 const thumbnailsDir = "assets/thumbnails"
@@ -40,10 +42,15 @@ func stepYouTube(ctx context.Context, deps Deps, run *domain.Run) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
-	title := run.Title
-	if title == "" {
-		title = fmt.Sprintf("%s - %s", run.Series, run.Episode)
+	// Get actual video duration from the rendered file.
+	actualDurSec, err := render.ProbeDuration(ctx, deps.Render.FFprobeBin, videoAsset.Path)
+	if err != nil {
+		log.Printf("step_youtube: ffprobe duration failed, falling back to DurationMin: %v", err)
+		actualDurSec = float64(run.DurationMin) * 60
 	}
+	actualDurMin := int(math.Round(actualDurSec / 60))
+
+	title := formatYouTubeTitle(run, actualDurMin)
 	desc := fmt.Sprintf("A gentle sleep narration.\n\nSeries: %s\nEpisode: %s\nStyle: %s",
 		run.Series, run.Episode, run.Style)
 	tags := []string{"sleep", "narration", "relaxation", run.Style, run.Series}
@@ -68,6 +75,34 @@ func stepYouTube(ctx context.Context, deps Deps, run *domain.Run) error {
 
 	log.Printf("step_youtube: uploaded run %s → youtube.com/watch?v=%s", run.ID, videoID)
 	return nil
+}
+
+// formatYouTubeTitle builds the YouTube title in the format:
+// "Deep Sleep Story | {Style} - {Title} ({duration})"
+// e.g. "Deep Sleep Story | Cosmos - Drifting Through the Dark (2.5 Hours)"
+// actualMin is the real video duration in minutes (from ffprobe).
+func formatYouTubeTitle(run *domain.Run, actualMin int) string {
+	dur := formatDuration(actualMin)
+	return fmt.Sprintf("Deep Sleep Story | %s - %s (%s)", run.Style, run.Episode, dur)
+}
+
+// formatDuration converts minutes to a human-readable duration string.
+// e.g. 150 → "2.5 Hours", 60 → "1 Hour", 30 → "30 Minutes"
+func formatDuration(minutes int) string {
+	if minutes < 60 {
+		return fmt.Sprintf("%d Minutes", minutes)
+	}
+	hours := float64(minutes) / 60.0
+	// Whole hours: "2 Hours", "1 Hour"
+	if minutes%60 == 0 {
+		h := minutes / 60
+		if h == 1 {
+			return "1 Hour"
+		}
+		return fmt.Sprintf("%d Hours", h)
+	}
+	// Fractional: "2.5 Hours", "1.5 Hours"
+	return fmt.Sprintf("%.1f Hours", hours)
 }
 
 // findThumbnail looks for a thumbnail matching the style name in assets/thumbnails/.

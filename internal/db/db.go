@@ -156,6 +156,18 @@ func (d *DB) UpdateRunTitle(ctx context.Context, id string, title string, locked
 	return nil
 }
 
+// UpdateRunEpisode sets the episode name for a run.
+func (d *DB) UpdateRunEpisode(ctx context.Context, id string, episode string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET episode = $1, updated_at = now() WHERE id = $2`,
+		episode, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update episode: %w", err)
+	}
+	return nil
+}
+
 // ResetRunToStatus resets a run back to a given status, clearing error state.
 func (d *DB) ResetRunToStatus(ctx context.Context, id string, status domain.RunStatus) error {
 	_, err := d.pool.ExecContext(ctx,

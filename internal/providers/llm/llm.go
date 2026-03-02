@@ -56,6 +56,9 @@ type ScriptRequest struct {
 	// Continuation mode: if non-empty, the LLM continues from this script
 	// instead of generating from scratch. Only the new paragraphs are returned.
 	ExistingScript string
+
+	// BannedPhrases is included in the prompt for the model to avoid.
+	BannedPhrases []string
 }
 
 // ScriptResult contains the generated script in two formats.
@@ -84,85 +87,31 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
-// GenerateScript calls the LLM and returns the result.
-// QA validation is handled externally by the pipeline's qaScript stage
-// and fix engine, which provide smarter retries with parameter adjustments.
+// -------- Chunked iterative script generation --------
+
+const paragraphsPerChunk = 12
+
+// GenerateScript produces a sleep narration script using chunked iterative generation.
+// The total script is split into chunks of 12 paragraphs each. Each chunk is generated
+// with a separate LLM call, using the previous chunk's last 2 paragraphs as context.
+// In continuation mode (ExistingScript non-empty), already-completed chunks are skipped.
 func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*ScriptResult, error) {
 	wordCount := req.DurationMin * 130
 	if req.TargetWords > 0 {
 		wordCount = req.TargetWords
 	}
 
-	// --- Continuation mode: append to existing script instead of regenerating ---
-	if req.ExistingScript != "" {
-		return c.continueScript(ctx, req, wordCount)
+	totalParagraphs := wordCount / 56
+	if totalParagraphs < 12 {
+		totalParagraphs = 12
 	}
 
-	userPrompt, err := buildPrompt(req, wordCount)
-	if err != nil {
-		return nil, fmt.Errorf("build prompt: %w", err)
-	}
+	numChunks := (totalParagraphs + paragraphsPerChunk - 1) / paragraphsPerChunk
 
-	sysPrompt := systemPrompt
-	if req.ExtraInstruction != "" {
-		sysPrompt += "\n\n" + req.ExtraInstruction
-	}
+	log.Printf("llm: plan — %d target words, %d total paragraphs, %d chunks of %d paragraphs",
+		wordCount, totalParagraphs, numChunks, paragraphsPerChunk)
 
-	messages := []chatMsg{
-		{Role: "system", Content: sysPrompt},
-		{Role: "user", Content: userPrompt},
-	}
-
-	log.Printf("llm: === GENERATE SCRIPT PROMPT ===\n[SYSTEM]\n%s\n\n[USER]\n%s\n=== END PROMPT ===", sysPrompt, userPrompt)
-
-	// Compute a hard max_tokens ceiling to prevent runaway generation.
-	// LLM now produces markdown only (no SSML), so budget is ~1.5 tokens/word + headroom.
-	capWords := req.MaxWords
-	if capWords <= 0 {
-		capWords = wordCount
-	}
-	// Token budget: ~1.2 tokens/word for English, ~2 for Turkish/other.
-	// English simple prose averages ~1.1 tokens/word; 1.2x gives slight headroom.
-	// Non-English needs more due to multi-byte tokenization.
-	tokMult := tokMultForLang(req.Language)
-	maxTokens := int(float64(capWords) * tokMult)
-	if maxTokens < 1024 {
-		maxTokens = 1024 // floor: never starve the model
-	}
-
-	raw, err := c.chatCompletionWithRetry(ctx, messages, completionOpts{
-		Temperature:      req.Temperature,
-		MaxTokens:        maxTokens,
-		FrequencyPenalty: 0.3,
-		PresencePenalty:  0.4,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return parseScriptResponse(raw)
-}
-
-// continueScript sends the existing script to the LLM and asks it to continue
-// writing until reaching the target word count. Only new paragraphs are returned.
-// The caller (stepScript) is responsible for concatenating existing + new text.
-func (c *Client) continueScript(ctx context.Context, req ScriptRequest, wordCount int) (*ScriptResult, error) {
-	actualWords := len(strings.Fields(req.ExistingScript))
-	maxWords := req.MaxWords
-	if maxWords <= 0 {
-		maxWords = wordCount
-	}
-
-	// Allow 10% overshoot so the model can finish paragraphs gracefully.
-	softMax := int(float64(maxWords)*1.1) - actualWords
-	if softMax < 200 {
-		softMax = 200
-	}
-	neededWords := wordCount - actualWords
-	if neededWords < 100 {
-		neededWords = 100
-	}
-
+	// Resolve language name.
 	lang := req.Language
 	if lang == "" {
 		lang = "en"
@@ -172,57 +121,426 @@ func (c *Client) continueScript(ctx context.Context, req ScriptRequest, wordCoun
 		langName = "English"
 	}
 
-	contPrompt, err := buildContinuationPrompt(continuationData{
-		ExistingScript: req.ExistingScript,
-		ActualWords:    actualWords,
-		NeededWords:    neededWords,
-		SoftMax:        softMax,
-		LangName:       langName,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("build continuation prompt: %w", err)
+	// Resolve style description and imagery sets.
+	styleDesc, ok := styleGuides[req.Style]
+	if !ok {
+		styleDesc = styleGuides["Cosmos"]
+	}
+	imagery, ok := imagerySets[req.Style]
+	if !ok {
+		imagery = imagerySets["Cosmos"]
 	}
 
+	// Build system prompt.
 	sysPrompt := systemPrompt
 	if req.ExtraInstruction != "" {
 		sysPrompt += "\n\n" + req.ExtraInstruction
 	}
 
-	messages := []chatMsg{
-		{Role: "system", Content: sysPrompt},
-		{Role: "user", Content: contPrompt},
+	// In continuation mode, count existing paragraphs to skip completed chunks.
+	skipChunks := 0
+	var previousContext string
+	if req.ExistingScript != "" {
+		existingParas := splitParagraphs(req.ExistingScript)
+		skipChunks = len(existingParas) / paragraphsPerChunk
+		if skipChunks >= numChunks {
+			// Already have enough paragraphs — nothing to generate.
+			md := req.ExistingScript
+			return &ScriptResult{Markdown: md, SSML: MarkdownToSSML(md)}, nil
+		}
+		// Use last 2 paragraphs as context for the next chunk.
+		if len(existingParas) >= 2 {
+			previousContext = strings.Join(existingParas[len(existingParas)-2:], "\n\n")
+		} else if len(existingParas) > 0 {
+			previousContext = existingParas[len(existingParas)-1]
+		}
+		log.Printf("llm: continuation mode — %d existing paragraphs, skipping %d chunks, generating from chunk %d",
+			len(existingParas), skipChunks, skipChunks+1)
 	}
 
-	log.Printf("llm: === CONTINUATION PROMPT ===\n[SYSTEM]\n%s\n\n[USER]\n%s\n=== END PROMPT ===", sysPrompt, truncate(contPrompt, 2000))
-
-	tokMult := tokMultForLang(req.Language)
-	maxTokens := int(float64(softMax) * tokMult)
-	if maxTokens < 512 {
-		maxTokens = 512
+	// Token budget per chunk.
+	maxTokens := paragraphsPerChunk * 120
+	if maxTokens < 1500 {
+		maxTokens = 1500
+	}
+	if maxTokens > 4000 {
+		maxTokens = 4000
 	}
 
-	raw, err := c.chatCompletionWithRetry(ctx, messages, completionOpts{
-		Temperature:      req.Temperature,
-		MaxTokens:        maxTokens,
-		FrequencyPenalty: 0.3,
-		PresencePenalty:  0.4,
-	})
-	if err != nil {
-		return nil, err
+	var accumulated strings.Builder
+	for i := skipChunks; i < numChunks; i++ {
+		remaining := totalParagraphs - (i * paragraphsPerChunk)
+		thisChunkParas := paragraphsPerChunk
+		if remaining < thisChunkParas {
+			thisChunkParas = remaining
+		}
+		if thisChunkParas <= 0 {
+			break
+		}
+
+		// Pick imagery sets for this chunk by rotating through the 10 sets.
+		chunkImagery := rotateImagery(imagery, i)
+
+		chunkMinWords := thisChunkParas * 50
+		chunkMaxWords := thisChunkParas * 65
+
+		data := chunkData{
+			ParagraphCount:   thisChunkParas,
+			IsFirstChunk:     i == 0 && req.ExistingScript == "",
+			IsLastChunk:      i == numChunks-1,
+			Series:           req.Series,
+			Episode:          req.Episode,
+			LangName:         langName,
+			StyleDescription: styleDesc,
+			ImagerySets:      chunkImagery,
+			PreviousContext:  previousContext,
+			ChunkMinWords:    chunkMinWords,
+			ChunkMaxWords:    chunkMaxWords,
+		}
+
+		userPrompt, err := buildChunkPrompt(data)
+		if err != nil {
+			return nil, fmt.Errorf("build chunk prompt %d: %w", i+1, err)
+		}
+
+		messages := []chatMsg{
+			{Role: "system", Content: sysPrompt},
+			{Role: "user", Content: userPrompt},
+		}
+
+		log.Printf("llm: chunk %d/%d — generating %d paragraphs (%d-%d words), maxTokens=%d",
+			i+1, numChunks, thisChunkParas, chunkMinWords, chunkMaxWords, maxTokens)
+		log.Printf("llm: chunk %d/%d prompt:\n[SYSTEM]\n%s\n\n[USER]\n%s",
+			i+1, numChunks, truncate(sysPrompt, 500), truncate(userPrompt, 1500))
+
+		raw, err := c.chatCompletionWithRetry(ctx, messages, completionOpts{
+			Temperature:      req.Temperature,
+			MaxTokens:        maxTokens,
+			FrequencyPenalty: 0.3,
+			PresencePenalty:  0.4,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("chunk %d/%d: %w", i+1, numChunks, err)
+		}
+
+		chunkText := cleanChunkOutput(raw)
+		if chunkText == "" {
+			return nil, fmt.Errorf("chunk %d/%d: empty response from LLM (raw %d bytes: %q)",
+				i+1, numChunks, len(raw), truncate(raw, 200))
+		}
+
+		// Update previous context for next chunk.
+		chunkParas := splitParagraphs(chunkText)
+		if len(chunkParas) >= 2 {
+			previousContext = strings.Join(chunkParas[len(chunkParas)-2:], "\n\n")
+		} else if len(chunkParas) > 0 {
+			previousContext = chunkParas[len(chunkParas)-1]
+		}
+
+		if accumulated.Len() > 0 {
+			accumulated.WriteString("\n\n")
+		}
+		accumulated.WriteString(chunkText)
+
+		totalWords := len(strings.Fields(accumulated.String()))
+		log.Printf("llm: chunk %d/%d done (%d paragraphs, %d total words so far)",
+			i+1, numChunks, len(chunkParas), totalWords)
 	}
 
-	return parseScriptResponse(raw)
+	md := strings.TrimSpace(accumulated.String())
+	if md == "" {
+		return nil, fmt.Errorf("empty script after all chunks")
+	}
+
+	// Post-process: replace banned words with safe synonyms.
+	md = replaceBannedWords(md, req.BannedPhrases)
+
+	ssml := MarkdownToSSML(md)
+	return &ScriptResult{Markdown: md, SSML: ssml}, nil
 }
 
-// tokMultForLang returns the token-per-word multiplier for the given language.
-func tokMultForLang(lang string) float64 {
-	switch lang {
-	case "tr", "pt", "es", "it":
-		return 2.0
-	default:
-		return 1.2
+// splitParagraphs splits text on blank lines and returns non-empty paragraphs.
+func splitParagraphs(text string) []string {
+	parts := strings.Split(text, "\n\n")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
 	}
+	return result
 }
+
+// rotateImagery returns the imagery sets rotated for the given chunk index.
+// Each chunk gets a different starting position in the imagery list.
+func rotateImagery(imagery []string, chunkIndex int) []string {
+	n := len(imagery)
+	if n == 0 {
+		return imagery
+	}
+	start := (chunkIndex * paragraphsPerChunk) % n
+	rotated := make([]string, n)
+	for i := 0; i < n; i++ {
+		rotated[i] = imagery[(start+i)%n]
+	}
+	return rotated
+}
+
+// bannedReplacements maps banned words to safe, calm synonyms.
+// Used for post-processing: the model sometimes ignores prompt rules,
+// so we replace banned words to guarantee compliance without deleting sentences.
+var bannedReplacements = map[string]string{
+	"suddenly":    "gently",
+	"blood":       "warmth",
+	"scream":      "whisper",
+	"terror":      "stillness",
+	"panic":       "calm",
+	"kill":        "rest",
+	"dead":        "still",
+	"gun":         "breeze",
+	"fight":       "peace",
+	"attack":      "embrace",
+	"explosion":   "shimmer",
+	"horror":      "comfort",
+	"nightmare":   "dream",
+	"violent":     "gentle",
+	"murder":      "silence",
+	"death":       "rest",
+	"war":         "peace",
+	"battle":      "harmony",
+	"weapon":      "feather",
+	"destroy":     "soften",
+	"rage":        "calm",
+	"wound":       "touch",
+	"shriek":      "hush",
+	"jolt":        "drift",
+	"alarm":       "chime",
+	"collapse":    "settle",
+	"danger":      "comfort",
+	"fear":        "ease",
+	"crash":       "hush",
+	"void":        "space",
+	"disappear":   "linger",
+	"swallow":     "cradle",
+	"consume":     "embrace",
+	"annihilate":  "dissolve",
+}
+
+// replaceBannedWords replaces banned words with safe synonyms (case-insensitive,
+// whole-word matching). Preserves sentence structure and word count.
+func replaceBannedWords(text string, banned []string) string {
+	if len(banned) == 0 {
+		return text
+	}
+	replaced := 0
+	words := strings.Fields(text)
+	for i, w := range words {
+		// Strip punctuation for matching but preserve it in output.
+		clean := strings.TrimRight(w, ".,;:!?\"')")
+		suffix := w[len(clean):]
+		prefix := ""
+		clean = strings.TrimLeft(clean, "\"'(")
+		if len(clean) < len(w)-len(suffix) {
+			prefix = w[:len(w)-len(suffix)-len(clean)]
+		}
+
+		lower := strings.ToLower(clean)
+		for _, b := range banned {
+			if lower == strings.ToLower(b) {
+				if repl, ok := bannedReplacements[lower]; ok {
+					// Preserve original capitalization of first letter.
+					if len(clean) > 0 && clean[0] >= 'A' && clean[0] <= 'Z' {
+						repl = strings.ToUpper(repl[:1]) + repl[1:]
+					}
+					words[i] = prefix + repl + suffix
+					replaced++
+				}
+				break
+			}
+		}
+	}
+	if replaced > 0 {
+		log.Printf("llm: post-process replaced %d banned word(s) with safe synonyms", replaced)
+	}
+	// Rebuild text preserving paragraph structure.
+	return rebuildWithParagraphs(text, words)
+}
+
+// rebuildWithParagraphs reconstructs text with replaced words while preserving
+// the original paragraph (double-newline) structure.
+func rebuildWithParagraphs(original string, words []string) string {
+	paragraphs := strings.Split(original, "\n\n")
+	wi := 0
+	var result []string
+	for _, para := range paragraphs {
+		para = strings.TrimSpace(para)
+		if para == "" {
+			continue
+		}
+		n := len(strings.Fields(para))
+		if wi+n > len(words) {
+			n = len(words) - wi
+		}
+		result = append(result, strings.Join(words[wi:wi+n], " "))
+		wi += n
+	}
+	return strings.Join(result, "\n\n")
+}
+
+// cleanChunkOutput strips any unwanted LLM artifacts from chunk output.
+func cleanChunkOutput(raw string) string {
+	md := raw
+	// Strip any SSML section the model may have included.
+	for _, sep := range []string{"---SSML---", "---\nSSML---", "---\n\nSSML---", "--- SSML ---", "---SSML ---"} {
+		if idx := strings.Index(md, sep); idx >= 0 {
+			md = md[:idx]
+			break
+		}
+	}
+	return strings.TrimSpace(md)
+}
+
+// -------- Chunk prompt template --------
+
+type chunkData struct {
+	ParagraphCount   int
+	IsFirstChunk     bool
+	IsLastChunk      bool
+	Series           string
+	Episode          string
+	LangName         string
+	StyleDescription string
+	ImagerySets      []string
+	PreviousContext  string
+	ChunkMinWords    int
+	ChunkMaxWords    int
+}
+
+var chunkTmpl = template.Must(template.New("chunk").Funcs(template.FuncMap{
+	"add": func(a, b int) int { return a + b },
+}).Parse(`CONTENT GOAL:
+Write exactly {{.ParagraphCount}} paragraphs.
+Each paragraph must contain exactly 4 sentences.
+Every sentence must be 8-20 words and end with a period.
+This structure is mandatory.
+{{if .IsFirstChunk}}
+WORD COUNT GOAL:
+The total word count MUST be {{.ChunkMinWords}}-{{.ChunkMaxWords}} words. If below {{.ChunkMinWords}}, continue writing. If above {{.ChunkMaxWords}}, stop immediately before exceeding {{.ChunkMaxWords}}
+{{else}}
+WORD COUNT GOAL:
+Continue the script. Write {{.ChunkMinWords}}-{{.ChunkMaxWords}} new words.
+Do NOT repeat any existing text.
+{{end}}
+STYLE:
+Series: {{.Series}}
+Episode: {{.Episode}}
+Language: {{.LangName}}
+Present tense only.
+{{.StyleDescription}}
+
+VARIETY WITHOUT REPETITION:
+Use these imagery sets and rotate through them, never repeating a full sentence:
+{{range $i, $img := .ImagerySets}}{{add $i 1}}. {{$img}}
+{{end}}
+PACING:
+{{if .IsFirstChunk}}Begin extremely gentle.{{else}}Continue from where the previous section ended.{{end}}
+Each paragraph becomes slightly softer and quieter.
+{{if .IsLastChunk}}End with the softest imagery and stillness.{{end}}
+{{if .PreviousContext}}
+=== PREVIOUS CONTEXT (last 2 paragraphs, DO NOT REPEAT) ===
+{{.PreviousContext}}
+=== END CONTEXT ===
+{{end}}
+Output only the {{.ParagraphCount}} new paragraphs. Nothing else.`))
+
+func buildChunkPrompt(data chunkData) (string, error) {
+	var buf bytes.Buffer
+	if err := chunkTmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// -------- System prompt --------
+
+const systemPrompt = `You are a sleep narration scriptwriter. Produce calm, slow-paced plain text for sleep videos.
+
+ABSOLUTE RULES:
+1. Never use any banned words: suddenly, blood, scream, terror, panic, kill, dead, gun, fight, attack, explosion, horror, nightmare, violent, murder, death, war, battle, weapon, destroy, rage, wound, shriek, jolt, alarm, collapse, danger, fear, crash, void, disappear, fade away, swallow, consume, annihilate, wake up, open your eyes, become alert.
+2. Zero exclamation marks. Use periods, commas, and occasional semicolons only.
+3. Every sentence must be 8-20 words. Every sentence ends with a period.
+4. No ALL CAPS words.
+5. No titles, headings, markdown, bullet points, numbered lists, SSML, or XML.
+6. No ellipsis, em-dashes, or decorative punctuation.
+7. No existential questions, philosophical musings, tension, conflict, or suspense.
+8. No wake-up cues or references to waking, alertness, or opening eyes.
+9. Plain prose paragraphs separated by blank lines. Nothing else.
+10. No inspirational tone. No motivational language. No transformation narrative. No destiny or purpose language
+
+SELF-CHECK:
+Before you answer, scan for banned words and sentence length violations.
+Fix silently. Return only the script.`
+
+// -------- Language & style maps --------
+
+var langNames = map[string]string{
+	"en": "English",
+	"tr": "Turkish",
+	"pt": "Portuguese",
+	"es": "Spanish",
+	"it": "Italian",
+}
+
+var styleGuides = map[string]string{
+	"Cosmos": "Imagery of deep space, drifting nebulae, distant stars, gentle cosmic winds, " +
+		"the silence between galaxies, soft light from faraway suns, slowly turning planets.",
+	"Earthside": "Imagery of quiet forests, still lakes, gentle rainfall, moss-covered stones, " +
+		"slow rivers, meadows at dusk, soft moonlight on rolling hills.",
+	"Myth": "Imagery of enchanted gardens, ancient sleeping libraries, gentle mythical creatures at rest, " +
+		"soft lantern light, timeless quiet villages, dreaming mountains.",
+}
+
+var imagerySets = map[string][]string{
+	"Cosmos": {
+		"Soft starlight on distant dust.",
+		"Slow moons in wide orbits.",
+		"Nebula haze with muted colors.",
+		"Quiet planet nightsides and thin atmospheres.",
+		"Gentle rings and faint ice grains.",
+		"Far suns as warm, steady glow.",
+		"Constellation shapes and slow drifting perspective.",
+		"Calm cosmic winds as soft movement of light.",
+		"Deep space textures: velvet dark, soft gradients, distant shimmer.",
+		"Very quiet closing stillness with dim, steady light.",
+	},
+	"Earthside": {
+		"Dew forming on cool morning grass.",
+		"Still lake reflecting pale sky.",
+		"Moss growing on ancient stones.",
+		"Slow river bending through quiet meadow.",
+		"Soft rain on broad green leaves.",
+		"Fireflies drifting in warm dusk air.",
+		"Fog settling into low valleys.",
+		"Moonlight pooling on forest floor.",
+		"Birch bark peeling in gentle wind.",
+		"Snow falling softly on sleeping fields.",
+	},
+	"Myth": {
+		"Lantern glow in an old stone garden.",
+		"Sleeping dragon curled near warm embers.",
+		"Ancient library with dusty, dreaming books.",
+		"Quiet village under a canopy of stars.",
+		"Silver thread of a forgotten lullaby.",
+		"Gentle giant resting in a flower meadow.",
+		"Enchanted well reflecting a calm moon.",
+		"Soft chimes in a temple courtyard.",
+		"Woven tapestry showing peaceful legends.",
+		"Mist over a bridge to quiet lands.",
+	},
+}
+
+// -------- Title generation --------
 
 // GenerateTitle calls the LLM to produce a short, calm video title based on script content.
 func (c *Client) GenerateTitle(ctx context.Context, req TitleRequest) (string, error) {
@@ -235,15 +553,15 @@ func (c *Client) GenerateTitle(ctx context.Context, req TitleRequest) (string, e
 		langName = "English"
 	}
 
-	sysPrompt := fmt.Sprintf(`You are a YouTube title writer for sleep/relaxation videos.
-Write exactly ONE short video title. Rules:
-- Maximum 60 characters
+	sysPrompt := fmt.Sprintf(`Generate a short episode name for a sleep narration video.
+Rules:
+- 2-5 words maximum. Short and evocative.
 - Language: %s
-- Calm, gentle, inviting tone
-- SEO-friendly (include "sleep" or equivalent in the language)
-- No clickbait, no ALL CAPS, no exclamation marks
-- No quotes around the title
-- Return ONLY the title text, nothing else`, langName)
+- Poetic, calm, imagery-based. Like a place or scene name.
+- No generic words like "sleep", "relaxation", "journey", "peaceful".
+- No clickbait, no ALL CAPS, no exclamation marks, no quotes.
+- Examples: "Rings of Saturn", "The Slow Moons", "Velvet Meadow", "Amber Lanterns"
+- Return ONLY the episode name, nothing else.`, langName)
 
 	userPrompt := fmt.Sprintf("Series: %s\nEpisode: %s\nStyle: %s\nDuration: %d minutes\n\nScript excerpt:\n%s",
 		req.Series, req.Episode, req.Style, req.DurationMin, req.ScriptExcerpt)
@@ -268,6 +586,8 @@ Write exactly ONE short video title. Rules:
 
 	return title, nil
 }
+
+// -------- OpenAI chat completions --------
 
 // chatCompletionWithRetry wraps chatCompletion with transient-error retries
 // (429, 502, 503, 504) so the caller doesn't have to mix transient retries
@@ -301,12 +621,12 @@ type chatMsg struct {
 }
 
 type chatReq struct {
-	Model            string    `json:"model"`
-	Messages         []chatMsg `json:"messages"`
-	Temperature      float64   `json:"temperature"`
-	MaxCompletionTokens int    `json:"max_completion_tokens,omitempty"`
-	FrequencyPenalty float64   `json:"frequency_penalty,omitempty"`
-	PresencePenalty  float64   `json:"presence_penalty,omitempty"`
+	Model               string    `json:"model"`
+	Messages            []chatMsg `json:"messages"`
+	Temperature         float64   `json:"temperature"`
+	MaxCompletionTokens int       `json:"max_completion_tokens,omitempty"`
+	FrequencyPenalty    float64   `json:"frequency_penalty,omitempty"`
+	PresencePenalty     float64   `json:"presence_penalty,omitempty"`
 }
 
 type chatResp struct {
@@ -333,12 +653,12 @@ func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, opts comple
 		temperature = 0.7
 	}
 	body, err := json.Marshal(chatReq{
-		Model:            c.cfg.Model,
-		Messages:         msgs,
-		Temperature:      temperature,
+		Model:               c.cfg.Model,
+		Messages:            msgs,
+		Temperature:         temperature,
 		MaxCompletionTokens: opts.MaxTokens,
-		FrequencyPenalty: opts.FrequencyPenalty,
-		PresencePenalty:  opts.PresencePenalty,
+		FrequencyPenalty:    opts.FrequencyPenalty,
+		PresencePenalty:     opts.PresencePenalty,
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
@@ -393,165 +713,7 @@ func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, opts comple
 	return cr.Choices[0].Message.Content, nil
 }
 
-// -------- Prompt template --------
-
-const systemPrompt = `You are a sleep narration scriptwriter. You produce calm, slow-paced plain text for sleep videos.
-
-=== ABSOLUTE RULES (violating any = failure) ===
-
-1. BANNED WORDS — never use: suddenly, blood, scream, terror, panic, kill, dead, gun, fight, attack, explosion, horror, nightmare, violent, murder, death, war, battle, weapon, destroy, rage, wound, shriek, jolt, alarm, collapse, danger, fear, crash, void, disappear, fade away, swallow, consume, annihilate, wake up, open your eyes, become alert
-2. ZERO exclamation marks. Only use periods, commas, and occasional semicolons.
-3. Every sentence must be 8-20 words. No exceptions. Break long sentences with periods.
-4. No ALL CAPS words.
-5. No titles, headings, markdown, bullet points, numbered lists, SSML, or XML.
-6. No ellipsis (...), em-dashes (—), or decorative punctuation.
-7. No existential questions, philosophical musings, tension, conflict, or suspense.
-8. No wake-up cues or references to waking, alertness, or opening eyes.
-9. Plain prose paragraphs separated by blank lines. Nothing else.
-
-=== TONE ===
-- Calm, soft, stable, hypnotic, monotone-friendly.
-- Imagery must soothe, never startle.
-- Every paragraph should feel slower and softer than the previous one.
-- Descriptive, sensory imagery only: sight, gentle sounds, soft textures, warmth.
-- Gradual, dreamlike progression with no plot.
-
-=== SELF-CHECK ===
-Before returning, scan your output for banned words and sentences over 20 words. Fix any violations silently. Return ONLY the clean script.`
-
-var langNames = map[string]string{
-	"en": "English",
-	"tr": "Turkish",
-	"pt": "Portuguese",
-	"es": "Spanish",
-	"it": "Italian",
-}
-
-var userTmpl = template.Must(template.New("user").Parse(`Write a sleep narration script.
-
-Series: {{.Series}}
-Episode: {{.Episode}}
-Style: {{.Style}}
-Language: {{.LangName}}
-Style guide: {{.StyleGuide}}
-
-{{if and .MinWords .MaxWords}}=== WORD COUNT (MANDATORY) ===
-Target: {{.WordCount}} words.
-Minimum: {{.MinWords}} words. Maximum: {{.MaxWords}} words.
-You MUST write at least {{.MinWords}} words. Keep writing new paragraphs until you reach {{.WordCount}}.
-STOP before exceeding {{.MaxWords}}. Do not stop early. Do not overshoot.
-{{else}}Word count: approximately {{.WordCount}} words ({{.DurationMin}} minutes at ~130 words per minute).
-Write at least {{.WordCount}} words. Do not stop early.
-{{end}}
-Write the ENTIRE script in {{.LangName}}.
-
-Additional rules:
-- Use present tense throughout.
-- Begin gently, let imagery soften further as the script continues.
-- End with a passage that fades into silence and stillness.
-- Each paragraph must introduce fresh imagery. No verbatim repetition.
-- Vary sentence length and vocabulary. Avoid looping patterns.
-
-Output: plain text paragraphs only, separated by blank lines. Nothing else.
-
-=== FINAL REMINDER (READ CAREFULLY) ===
-- You MUST write at least {{if .MinWords}}{{.MinWords}}{{else}}{{.WordCount}}{{end}} words. Do NOT stop before reaching this count.
-- Keep writing new calm paragraphs until you pass {{.WordCount}} words, then wrap up.
-- Every sentence MUST end with a period. Keep sentences between 8-20 words.
-- NEVER use the word "fear" or any banned word from the system prompt.
-- ZERO exclamation marks. Use only periods, commas, and semicolons.
-- This is a SLEEP script. Use only calm, gentle, soothing language. No motivational or inspirational tone.`))
-
-type continuationData struct {
-	ExistingScript string
-	ActualWords    int
-	NeededWords    int
-	SoftMax        int
-	LangName       string
-}
-
-var continuationTmpl = template.Must(template.New("cont").Parse(`Below is an incomplete sleep narration script (currently {{.ActualWords}} words).
-Continue writing from where it left off. Write approximately {{.NeededWords}} new words.
-You may write up to {{.SoftMax}} words of NEW text to finish your last paragraph gracefully.
-
-CRITICAL RULES:
-- Do NOT repeat or rewrite ANY part of the existing text.
-- Output ONLY the new continuation paragraphs.
-- Maintain the same tone, imagery style, and language ({{.LangName}}) as the existing script.
-- Every sentence must end with a period. Keep sentences 8-20 words.
-- End with a passage that fades into silence and stillness.
-- Follow ALL rules from the system prompt (banned words, no exclamation marks, etc.).
-
-=== EXISTING SCRIPT (DO NOT REPEAT) ===
-{{.ExistingScript}}
-=== END OF EXISTING SCRIPT ===
-
-Continue the script now. Write only new paragraphs.`))
-
-func buildContinuationPrompt(data continuationData) (string, error) {
-	var buf bytes.Buffer
-	if err := continuationTmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
-var styleGuides = map[string]string{
-	"Cosmos": "Imagery of deep space, drifting nebulae, distant stars, gentle cosmic winds, " +
-		"the silence between galaxies, soft light from faraway suns, slowly turning planets.",
-	"Earthside": "Imagery of quiet forests, still lakes, gentle rainfall, moss-covered stones, " +
-		"slow rivers, meadows at dusk, soft moonlight on rolling hills.",
-	"Myth": "Imagery of enchanted gardens, ancient sleeping libraries, gentle mythical creatures at rest, " +
-		"soft lantern light, timeless quiet villages, dreaming mountains.",
-}
-
-func buildPrompt(req ScriptRequest, wordCount int) (string, error) {
-	guide, ok := styleGuides[req.Style]
-	if !ok {
-		guide = styleGuides["Cosmos"]
-	}
-	lang := req.Language
-	if lang == "" {
-		lang = "en"
-	}
-	langName, ok := langNames[lang]
-	if !ok {
-		langName = "English"
-	}
-	data := struct {
-		Series, Episode, Style, StyleGuide, LangName string
-		DurationMin, WordCount, MinWords, MaxWords   int
-	}{req.Series, req.Episode, req.Style, guide, langName, req.DurationMin, wordCount, req.MinWords, req.MaxWords}
-
-	var buf bytes.Buffer
-	if err := userTmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
-func parseScriptResponse(raw string) (*ScriptResult, error) {
-	// Strip any SSML section the model may have included despite instructions.
-	md := raw
-	for _, sep := range []string{"---SSML---", "---\nSSML---", "---\n\nSSML---", "--- SSML ---", "---SSML ---"} {
-		if idx := strings.Index(md, sep); idx >= 0 {
-			md = md[:idx]
-			break
-		}
-	}
-	md = strings.TrimSpace(md)
-	if md == "" {
-		snippet := raw
-		if len(snippet) > 200 {
-			snippet = snippet[:200]
-		}
-		return nil, fmt.Errorf("empty script in LLM response (raw %d bytes: %q)", len(raw), snippet)
-	}
-
-	// Generate SSML from markdown: wrap paragraphs with <break> tags.
-	ssml := MarkdownToSSML(md)
-	return &ScriptResult{Markdown: md, SSML: ssml}, nil
-}
+// -------- Utilities --------
 
 // MarkdownToSSML converts plain-text paragraphs into SSML with pauses between them.
 func MarkdownToSSML(md string) string {

@@ -30,6 +30,7 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 		Temperature:      policy.LLMTemperature,
 		ExtraInstruction: strings.TrimSpace(policy.LLMExtraInstruction),
 		ExistingScript:   existingScript,
+		BannedPhrases:    policy.BannedPhrases,
 	})
 	if err != nil {
 		return err
@@ -65,11 +66,10 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 		_ = deps.DB.UpdateRunHash(ctx, run.ID, "script_hash", hash)
 	}
 
-	// Generate a dynamic title from script content, but only if the user
-	// hasn't locked a custom title.
+	// Generate an episode name from script content if the user didn't provide one.
 	if !run.TitleLocked {
 		excerpt := scriptExcerpt(result.Markdown, 500)
-		title, titleErr := deps.LLM.GenerateTitle(ctx, llm.TitleRequest{
+		epName, epErr := deps.LLM.GenerateTitle(ctx, llm.TitleRequest{
 			ScriptExcerpt: excerpt,
 			Series:        run.Series,
 			Episode:       run.Episode,
@@ -77,17 +77,17 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 			Language:      run.Language,
 			DurationMin:   run.DurationMin,
 		})
-		if titleErr != nil {
-			log.Printf("step_script: title generation failed (QA will catch): %v", titleErr)
+		if epErr != nil {
+			log.Printf("step_script: episode name generation failed: %v", epErr)
 		} else {
-			if err := deps.DB.UpdateRunTitle(ctx, run.ID, title, false); err != nil {
-				log.Printf("step_script: failed to save title: %v", err)
+			if err := deps.DB.UpdateRunEpisode(ctx, run.ID, epName); err != nil {
+				log.Printf("step_script: failed to save episode name: %v", err)
 			} else {
-				log.Printf("step_script: generated title: %q", title)
+				log.Printf("step_script: generated episode name: %q", epName)
 			}
 		}
 	} else {
-		log.Printf("step_script: title locked by user, keeping: %q", run.Title)
+		log.Printf("step_script: episode locked by user, keeping: %q", run.Episode)
 	}
 
 	log.Printf("step_script: done (%d words)", len(strings.Fields(result.Markdown)))

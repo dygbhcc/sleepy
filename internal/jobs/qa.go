@@ -242,7 +242,7 @@ func qaScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QA
 	if runErr != nil {
 		log.Printf("qa_script: could not re-read run for title check: %v", runErr)
 	} else {
-		title := strings.TrimSpace(freshRun.Title)
+		title := strings.TrimSpace(freshRun.Episode)
 		titleLen := len([]rune(title))
 		titleDiag := map[string]any{"title": title, "length": titleLen}
 
@@ -253,12 +253,12 @@ func qaScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QA
 		case title == "":
 			titlePass = false
 			titleDetails = "title is empty"
-		case titleLen < 10:
+		case titleLen < 5:
 			titlePass = false
-			titleDetails = fmt.Sprintf("title too short (%d chars, min 10)", titleLen)
-		case titleLen > 80:
+			titleDetails = fmt.Sprintf("episode name too short (%d chars, min 5)", titleLen)
+		case titleLen > 40:
 			titlePass = false
-			titleDetails = fmt.Sprintf("title too long (%d chars, max 80)", titleLen)
+			titleDetails = fmt.Sprintf("episode name too long (%d chars, max 40)", titleLen)
 		case title == strings.ToUpper(title) && titleLen > 5:
 			titlePass = false
 			titleDetails = "title is ALL CAPS"
