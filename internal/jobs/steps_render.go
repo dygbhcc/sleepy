@@ -27,13 +27,17 @@ func stepRender(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 		return fmt.Errorf("load narration asset: %w", err)
 	}
 
-	// Check idempotency: if audio hasn't changed since last render, skip.
+	// Check idempotency: if audio hasn't changed since last render AND the
+	// existing video passes integrity check, skip re-render.
 	currentHash, _ := computeFileHash(audioAsset.Path)
 	if currentHash != "" && currentHash == run.RenderHash {
 		if videoAsset, err := deps.DB.GetAsset(ctx, run.ID, domain.AssetVideoMP4); err == nil {
 			if info, err := os.Stat(videoAsset.Path); err == nil && info.Size() > 0 {
-				log.Printf("step_render: skipping (input hash unchanged: %s)", currentHash[:12])
-				return nil
+				if intErr := render.ProbeVideoIntegrity(ctx, deps.Render.FFmpegBin, videoAsset.Path); intErr == nil {
+					log.Printf("step_render: skipping (input hash unchanged: %s)", currentHash[:12])
+					return nil
+				}
+				log.Printf("step_render: existing video corrupt, re-rendering")
 			}
 		}
 	}
