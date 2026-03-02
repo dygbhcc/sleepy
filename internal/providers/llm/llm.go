@@ -110,15 +110,21 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 	if capWords <= 0 {
 		capWords = wordCount
 	}
-	// Token budget: ~1.5 tokens/word for English, ~2 for Turkish/other.
-	// Use 2x to avoid truncating non-English scripts while still capping runaway.
-	maxTokens := capWords * 2
+	// Token budget: ~1.2 tokens/word for English, ~2 for Turkish/other.
+	// English simple prose averages ~1.1 tokens/word; 1.2x gives slight headroom.
+	// Non-English needs more due to multi-byte tokenization.
+	tokMult := 1.2 // default for English
+	switch req.Language {
+	case "tr", "pt", "es", "it":
+		tokMult = 2.0
+	}
+	maxTokens := int(float64(capWords) * tokMult)
 
 	raw, err := c.chatCompletionWithRetry(ctx, messages, completionOpts{
 		Temperature:      req.Temperature,
 		MaxTokens:        maxTokens,
-		FrequencyPenalty: 0.2,
-		PresencePenalty:  0.3,
+		FrequencyPenalty: 0.3,
+		PresencePenalty:  0.4,
 	})
 	if err != nil {
 		return nil, err
@@ -355,7 +361,15 @@ Additional rules:
 - Each paragraph must introduce fresh imagery. No verbatim repetition.
 - Vary sentence length and vocabulary. Avoid looping patterns.
 
-Output: plain text paragraphs only, separated by blank lines. Nothing else.`))
+Output: plain text paragraphs only, separated by blank lines. Nothing else.
+
+=== FINAL REMINDER (READ CAREFULLY) ===
+- You MUST write at least {{if .MinWords}}{{.MinWords}}{{else}}{{.WordCount}}{{end}} words. Do NOT stop before reaching this count.
+- Keep writing new calm paragraphs until you pass {{.WordCount}} words, then wrap up.
+- Every sentence MUST end with a period. Keep sentences between 8-20 words.
+- NEVER use the word "fear" or any banned word from the system prompt.
+- ZERO exclamation marks. Use only periods, commas, and semicolons.
+- This is a SLEEP script. Use only calm, gentle, soothing language. No motivational or inspirational tone.`))
 
 var styleGuides = map[string]string{
 	"Cosmos": "Imagery of deep space, drifting nebulae, distant stars, gentle cosmic winds, " +

@@ -51,24 +51,29 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 		_ = deps.DB.UpdateRunHash(ctx, run.ID, "script_hash", hash)
 	}
 
-	// Generate a dynamic title from script content.
-	excerpt := scriptExcerpt(result.Markdown, 500)
-	title, titleErr := deps.LLM.GenerateTitle(ctx, llm.TitleRequest{
-		ScriptExcerpt: excerpt,
-		Series:        run.Series,
-		Episode:       run.Episode,
-		Style:         run.Style,
-		Language:      run.Language,
-		DurationMin:   run.DurationMin,
-	})
-	if titleErr != nil {
-		log.Printf("step_script: title generation failed (QA will catch): %v", titleErr)
-	} else {
-		if err := deps.DB.UpdateRunTitle(ctx, run.ID, title); err != nil {
-			log.Printf("step_script: failed to save title: %v", err)
+	// Generate a dynamic title from script content, but only if the user
+	// hasn't already provided one.
+	if run.Title == "" {
+		excerpt := scriptExcerpt(result.Markdown, 500)
+		title, titleErr := deps.LLM.GenerateTitle(ctx, llm.TitleRequest{
+			ScriptExcerpt: excerpt,
+			Series:        run.Series,
+			Episode:       run.Episode,
+			Style:         run.Style,
+			Language:      run.Language,
+			DurationMin:   run.DurationMin,
+		})
+		if titleErr != nil {
+			log.Printf("step_script: title generation failed (QA will catch): %v", titleErr)
 		} else {
-			log.Printf("step_script: generated title: %q", title)
+			if err := deps.DB.UpdateRunTitle(ctx, run.ID, title); err != nil {
+				log.Printf("step_script: failed to save title: %v", err)
+			} else {
+				log.Printf("step_script: generated title: %q", title)
+			}
 		}
+	} else {
+		log.Printf("step_script: keeping user-provided title: %q", run.Title)
 	}
 
 	log.Printf("step_script: done (%d words)", len(strings.Fields(result.Markdown)))
