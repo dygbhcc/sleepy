@@ -44,7 +44,7 @@ func (d *DB) Close() error { return d.pool.Close() }
 const runColumns = `id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at,
 	script_attempt, voice_attempt, render_attempt, package_attempt, youtube_attempt, last_error, needs_review,
 	script_hash, voice_hash, render_hash, locked_by, locked_at,
-	voice_approved, title, youtube_video_id, active_fix_plan_id, active_fix_start_attempt, policy_overrides_json`
+	voice_approved, title, title_locked, youtube_video_id, active_fix_plan_id, active_fix_start_attempt, policy_overrides_json`
 
 func scanRun(row interface{ Scan(...any) error }, r *domain.Run) error {
 	return row.Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
@@ -52,7 +52,7 @@ func scanRun(row interface{ Scan(...any) error }, r *domain.Run) error {
 		&r.ScriptAttempt, &r.VoiceAttempt, &r.RenderAttempt, &r.PackageAttempt, &r.YouTubeAttempt,
 		&r.LastError, &r.NeedsReview, &r.ScriptHash, &r.VoiceHash, &r.RenderHash,
 		&r.LockedBy, &r.LockedAt,
-		&r.VoiceApproved, &r.Title, &r.YouTubeVideoID, &r.ActiveFixPlanID, &r.ActiveFixStartAttempt, &r.PolicyOverridesJSON)
+		&r.VoiceApproved, &r.Title, &r.TitleLocked, &r.YouTubeVideoID, &r.ActiveFixPlanID, &r.ActiveFixStartAttempt, &r.PolicyOverridesJSON)
 }
 
 // GetRun loads a run by ID.
@@ -143,11 +143,12 @@ func (d *DB) UpdateRunHash(ctx context.Context, id string, column string, hash s
 	return nil
 }
 
-// UpdateRunTitle sets the AI-generated title for a run.
-func (d *DB) UpdateRunTitle(ctx context.Context, id string, title string) error {
+// UpdateRunTitle sets the title for a run. If locked is true, the title is
+// marked as user-provided and will not be overwritten by AI generation.
+func (d *DB) UpdateRunTitle(ctx context.Context, id string, title string, locked bool) error {
 	_, err := d.pool.ExecContext(ctx,
-		`UPDATE runs SET title = $1, updated_at = now() WHERE id = $2`,
-		title, id,
+		`UPDATE runs SET title = $1, title_locked = $2, updated_at = now() WHERE id = $3`,
+		title, locked, id,
 	)
 	if err != nil {
 		return fmt.Errorf("update title: %w", err)

@@ -2,7 +2,9 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"log"
+	"os"
 	"strings"
 
 	"sleepy/internal/domain"
@@ -12,6 +14,9 @@ import (
 func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) error {
 	log.Printf("step_script: generating for run %s (%s / %s / %s / %dmin, target_words=%d)",
 		run.ID, run.Series, run.Episode, run.Style, run.DurationMin, policy.TargetWords)
+
+	// Check if fix engine requested continuation mode.
+	existingScript := loadExistingScriptForContinuation(ctx, deps, run)
 
 	result, err := deps.LLM.GenerateScript(ctx, llm.ScriptRequest{
 		Series:           run.Series,
@@ -24,9 +29,18 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 		MaxWords:         policy.MaxWords,
 		Temperature:      policy.LLMTemperature,
 		ExtraInstruction: strings.TrimSpace(policy.LLMExtraInstruction),
+		ExistingScript:   existingScript,
 	})
 	if err != nil {
 		return err
+	}
+
+	// In continuation mode, merge existing script + new paragraphs.
+	if existingScript != "" {
+		result.Markdown = existingScript + "\n\n" + result.Markdown
+		result.SSML = llm.MarkdownToSSML(result.Markdown)
+		log.Printf("step_script: continuation merged (%d total words)",
+			len(strings.Fields(result.Markdown)))
 	}
 
 	mdPath, err := deps.Store.WriteBytes(run.ID, "script.md", []byte(result.Markdown))
@@ -52,8 +66,8 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 	}
 
 	// Generate a dynamic title from script content, but only if the user
-	// hasn't already provided one.
-	if run.Title == "" {
+	// hasn't locked a custom title.
+	if !run.TitleLocked {
 		excerpt := scriptExcerpt(result.Markdown, 500)
 		title, titleErr := deps.LLM.GenerateTitle(ctx, llm.TitleRequest{
 			ScriptExcerpt: excerpt,
@@ -66,18 +80,52 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 		if titleErr != nil {
 			log.Printf("step_script: title generation failed (QA will catch): %v", titleErr)
 		} else {
-			if err := deps.DB.UpdateRunTitle(ctx, run.ID, title); err != nil {
+			if err := deps.DB.UpdateRunTitle(ctx, run.ID, title, false); err != nil {
 				log.Printf("step_script: failed to save title: %v", err)
 			} else {
 				log.Printf("step_script: generated title: %q", title)
 			}
 		}
 	} else {
-		log.Printf("step_script: keeping user-provided title: %q", run.Title)
+		log.Printf("step_script: title locked by user, keeping: %q", run.Title)
 	}
 
 	log.Printf("step_script: done (%d words)", len(strings.Fields(result.Markdown)))
 	return nil
+}
+
+// loadExistingScriptForContinuation checks if the fix engine requested
+// continuation mode and loads the existing script.md if available.
+// Returns empty string if continuation is not active or script can't be read.
+func loadExistingScriptForContinuation(ctx context.Context, deps Deps, run *domain.Run) string {
+	if run.PolicyOverridesJSON == "" || run.PolicyOverridesJSON == "{}" {
+		return ""
+	}
+	var overrides map[string]any
+	if err := json.Unmarshal([]byte(run.PolicyOverridesJSON), &overrides); err != nil {
+		return ""
+	}
+	cont, _ := overrides["continuation"].(bool)
+	if !cont {
+		return ""
+	}
+
+	asset, err := deps.DB.GetAsset(ctx, run.ID, domain.AssetScriptMD)
+	if err != nil {
+		log.Printf("step_script: continuation requested but no existing script: %v", err)
+		return ""
+	}
+	data, err := os.ReadFile(asset.Path)
+	if err != nil {
+		log.Printf("step_script: continuation requested but can't read script: %v", err)
+		return ""
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return ""
+	}
+	log.Printf("step_script: continuation mode — existing script %d words", len(strings.Fields(content)))
+	return content
 }
 
 // scriptExcerpt returns the first n words of a script.

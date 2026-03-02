@@ -52,6 +52,10 @@ type ScriptRequest struct {
 	MaxWords         int     // hard maximum word count; 0 = no constraint
 	Temperature      float64 // 0 = use default (0.7)
 	ExtraInstruction string  // appended to system prompt
+
+	// Continuation mode: if non-empty, the LLM continues from this script
+	// instead of generating from scratch. Only the new paragraphs are returned.
+	ExistingScript string
 }
 
 // ScriptResult contains the generated script in two formats.
@@ -89,6 +93,11 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 		wordCount = req.TargetWords
 	}
 
+	// --- Continuation mode: append to existing script instead of regenerating ---
+	if req.ExistingScript != "" {
+		return c.continueScript(ctx, req, wordCount)
+	}
+
 	userPrompt, err := buildPrompt(req, wordCount)
 	if err != nil {
 		return nil, fmt.Errorf("build prompt: %w", err)
@@ -104,6 +113,8 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 		{Role: "user", Content: userPrompt},
 	}
 
+	log.Printf("llm: === GENERATE SCRIPT PROMPT ===\n[SYSTEM]\n%s\n\n[USER]\n%s\n=== END PROMPT ===", sysPrompt, userPrompt)
+
 	// Compute a hard max_tokens ceiling to prevent runaway generation.
 	// LLM now produces markdown only (no SSML), so budget is ~1.5 tokens/word + headroom.
 	capWords := req.MaxWords
@@ -113,12 +124,11 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 	// Token budget: ~1.2 tokens/word for English, ~2 for Turkish/other.
 	// English simple prose averages ~1.1 tokens/word; 1.2x gives slight headroom.
 	// Non-English needs more due to multi-byte tokenization.
-	tokMult := 1.2 // default for English
-	switch req.Language {
-	case "tr", "pt", "es", "it":
-		tokMult = 2.0
-	}
+	tokMult := tokMultForLang(req.Language)
 	maxTokens := int(float64(capWords) * tokMult)
+	if maxTokens < 1024 {
+		maxTokens = 1024 // floor: never starve the model
+	}
 
 	raw, err := c.chatCompletionWithRetry(ctx, messages, completionOpts{
 		Temperature:      req.Temperature,
@@ -131,6 +141,87 @@ func (c *Client) GenerateScript(ctx context.Context, req ScriptRequest) (*Script
 	}
 
 	return parseScriptResponse(raw)
+}
+
+// continueScript sends the existing script to the LLM and asks it to continue
+// writing until reaching the target word count. Only new paragraphs are returned.
+// The caller (stepScript) is responsible for concatenating existing + new text.
+func (c *Client) continueScript(ctx context.Context, req ScriptRequest, wordCount int) (*ScriptResult, error) {
+	actualWords := len(strings.Fields(req.ExistingScript))
+	maxWords := req.MaxWords
+	if maxWords <= 0 {
+		maxWords = wordCount
+	}
+
+	// Allow 10% overshoot so the model can finish paragraphs gracefully.
+	softMax := int(float64(maxWords)*1.1) - actualWords
+	if softMax < 200 {
+		softMax = 200
+	}
+	neededWords := wordCount - actualWords
+	if neededWords < 100 {
+		neededWords = 100
+	}
+
+	lang := req.Language
+	if lang == "" {
+		lang = "en"
+	}
+	langName, ok := langNames[lang]
+	if !ok {
+		langName = "English"
+	}
+
+	contPrompt, err := buildContinuationPrompt(continuationData{
+		ExistingScript: req.ExistingScript,
+		ActualWords:    actualWords,
+		NeededWords:    neededWords,
+		SoftMax:        softMax,
+		LangName:       langName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build continuation prompt: %w", err)
+	}
+
+	sysPrompt := systemPrompt
+	if req.ExtraInstruction != "" {
+		sysPrompt += "\n\n" + req.ExtraInstruction
+	}
+
+	messages := []chatMsg{
+		{Role: "system", Content: sysPrompt},
+		{Role: "user", Content: contPrompt},
+	}
+
+	log.Printf("llm: === CONTINUATION PROMPT ===\n[SYSTEM]\n%s\n\n[USER]\n%s\n=== END PROMPT ===", sysPrompt, truncate(contPrompt, 2000))
+
+	tokMult := tokMultForLang(req.Language)
+	maxTokens := int(float64(softMax) * tokMult)
+	if maxTokens < 512 {
+		maxTokens = 512
+	}
+
+	raw, err := c.chatCompletionWithRetry(ctx, messages, completionOpts{
+		Temperature:      req.Temperature,
+		MaxTokens:        maxTokens,
+		FrequencyPenalty: 0.3,
+		PresencePenalty:  0.4,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return parseScriptResponse(raw)
+}
+
+// tokMultForLang returns the token-per-word multiplier for the given language.
+func tokMultForLang(lang string) float64 {
+	switch lang {
+	case "tr", "pt", "es", "it":
+		return 2.0
+	default:
+		return 1.2
+	}
 }
 
 // GenerateTitle calls the LLM to produce a short, calm video title based on script content.
@@ -371,6 +462,40 @@ Output: plain text paragraphs only, separated by blank lines. Nothing else.
 - ZERO exclamation marks. Use only periods, commas, and semicolons.
 - This is a SLEEP script. Use only calm, gentle, soothing language. No motivational or inspirational tone.`))
 
+type continuationData struct {
+	ExistingScript string
+	ActualWords    int
+	NeededWords    int
+	SoftMax        int
+	LangName       string
+}
+
+var continuationTmpl = template.Must(template.New("cont").Parse(`Below is an incomplete sleep narration script (currently {{.ActualWords}} words).
+Continue writing from where it left off. Write approximately {{.NeededWords}} new words.
+You may write up to {{.SoftMax}} words of NEW text to finish your last paragraph gracefully.
+
+CRITICAL RULES:
+- Do NOT repeat or rewrite ANY part of the existing text.
+- Output ONLY the new continuation paragraphs.
+- Maintain the same tone, imagery style, and language ({{.LangName}}) as the existing script.
+- Every sentence must end with a period. Keep sentences 8-20 words.
+- End with a passage that fades into silence and stillness.
+- Follow ALL rules from the system prompt (banned words, no exclamation marks, etc.).
+
+=== EXISTING SCRIPT (DO NOT REPEAT) ===
+{{.ExistingScript}}
+=== END OF EXISTING SCRIPT ===
+
+Continue the script now. Write only new paragraphs.`))
+
+func buildContinuationPrompt(data continuationData) (string, error) {
+	var buf bytes.Buffer
+	if err := continuationTmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
 var styleGuides = map[string]string{
 	"Cosmos": "Imagery of deep space, drifting nebulae, distant stars, gentle cosmic winds, " +
 		"the silence between galaxies, soft light from faraway suns, slowly turning planets.",
@@ -416,16 +541,20 @@ func parseScriptResponse(raw string) (*ScriptResult, error) {
 	}
 	md = strings.TrimSpace(md)
 	if md == "" {
-		return nil, fmt.Errorf("empty script in LLM response")
+		snippet := raw
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return nil, fmt.Errorf("empty script in LLM response (raw %d bytes: %q)", len(raw), snippet)
 	}
 
 	// Generate SSML from markdown: wrap paragraphs with <break> tags.
-	ssml := markdownToSSML(md)
+	ssml := MarkdownToSSML(md)
 	return &ScriptResult{Markdown: md, SSML: ssml}, nil
 }
 
-// markdownToSSML converts plain-text paragraphs into SSML with pauses between them.
-func markdownToSSML(md string) string {
+// MarkdownToSSML converts plain-text paragraphs into SSML with pauses between them.
+func MarkdownToSSML(md string) string {
 	paragraphs := strings.Split(md, "\n\n")
 	var b strings.Builder
 	b.WriteString("<speak>\n")

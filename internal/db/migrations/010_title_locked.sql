@@ -1,0 +1,1 @@
+ALTER TABLE runs ADD COLUMN title_locked BOOLEAN NOT NULL DEFAULT false;

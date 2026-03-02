@@ -55,8 +55,8 @@ func applyOverrides(overrides map[string]any, policy *Policy) {
 				policy.TTSSimilarityBoost = f
 			}
 
-		// Meta keys consumed by FixEngine.DecideFix — not applied to policy.
-		case "target_words_mode", "target_words_buffer", "target_words_abs_buffer", "direction":
+		// Meta keys consumed by FixEngine.DecideFix or stepScript — not applied to policy.
+		case "target_words_mode", "target_words_buffer", "target_words_abs_buffer", "direction", "continuation":
 			// Handled elsewhere; skip.
 		default:
 			log.Printf("fix_overrides: unknown override key %q", k)

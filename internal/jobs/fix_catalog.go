@@ -37,37 +37,37 @@ func (c *FixCatalog) CandidatesFor(stage domain.RunStatus, ft FailType) []FixPla
 
 func scriptFixes() []FixPlan {
 	return []FixPlan{
-		// WORDCOUNT_LOW: set target to min_words + 150 via diag.
+		// WORDCOUNT_LOW: continue existing script instead of regenerating.
 		{
-			ID: "script_wc_low_min_padded", Stage: domain.StatusPending,
+			ID: "script_wc_low_continue", Stage: domain.StatusPending,
 			FailType: FailWordcountLow, Action: "retry",
 			TargetStatus: domain.StatusPending,
 			Overrides: map[string]any{
-				"target_words_mode":       "min_padded",
-				"target_words_abs_buffer": 150,
-				"llm_temperature":         0.7,
+				"continuation":    true,
+				"llm_temperature": 0.7,
 			},
 		},
-		// WORDCOUNT_LOW (aggressive): larger padding + expand instruction.
+		// WORDCOUNT_LOW (continuation with richer detail).
 		{
-			ID: "script_wc_low_aggressive", Stage: domain.StatusPending,
+			ID: "script_wc_low_continue_expand", Stage: domain.StatusPending,
+			FailType: FailWordcountLow, Action: "retry",
+			TargetStatus: domain.StatusPending,
+			Overrides: map[string]any{
+				"continuation":          true,
+				"llm_temperature":       0.8,
+				"llm_extra_instruction": "Add rich sensory details, new scenes, and diverse imagery in the continuation.",
+			},
+		},
+		// WORDCOUNT_LOW (full regen fallback): if continuation failed twice.
+		{
+			ID: "script_wc_low_regen", Stage: domain.StatusPending,
 			FailType: FailWordcountLow, Action: "retry",
 			TargetStatus: domain.StatusPending,
 			Overrides: map[string]any{
 				"target_words_mode":       "min_padded",
 				"target_words_abs_buffer": 300,
 				"llm_temperature":         0.7,
-				"llm_extra_instruction":   "The previous script was too short. Expand descriptions, add more sensory detail, and use longer paragraphs.",
-			},
-		},
-		// WORDCOUNT_LOW (factor fallback): when min_words diag is missing.
-		{
-			ID: "script_wc_low_factor", Stage: domain.StatusPending,
-			FailType: FailWordcountLow, Action: "retry",
-			TargetStatus: domain.StatusPending,
-			Overrides: map[string]any{
-				"llm_word_count_factor": 1.20,
-				"llm_temperature":       0.7,
+				"llm_extra_instruction":   "Write a complete script from scratch. Expand descriptions, add sensory detail, and use longer paragraphs.",
 			},
 		},
 		// WORDCOUNT_HIGH: set target to max_words - 150 via diag.

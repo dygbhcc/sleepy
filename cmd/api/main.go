@@ -127,6 +127,7 @@ func handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		Style       string `json:"style"`
 		Language    string `json:"language"`
 		DurationMin int    `json:"duration_min"`
+		Title       string `json:"title"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
@@ -152,6 +153,16 @@ func handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// If the user provided a title, lock it so AI won't overwrite.
+	if t := strings.TrimSpace(req.Title); t != "" {
+		if err := store.UpdateRunTitle(r.Context(), run.ID, t, true); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		run.Title = t
+		run.TitleLocked = true
 	}
 
 	if err := store.EnqueueJob(r.Context(), run.ID, jobs.JobTypeRunPipeline); err != nil {
