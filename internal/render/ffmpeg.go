@@ -81,7 +81,7 @@ func renderWithMusic(ctx context.Context, cfg RenderConfig, imagePath, audioPath
 
 	cmd := exec.CommandContext(ctx, cfg.FFmpegBin,
 		"-loop", "1", "-framerate", fmt.Sprintf("%d", OutputFPS), "-t", duration, "-i", imagePath,
-		"-i", audioPath,
+		"-t", duration, "-i", audioPath,
 		"-i", cfg.MusicPath,
 		"-filter_complex", fc,
 		"-map", "[vout]", "-map", "[aout]",
@@ -109,7 +109,7 @@ func renderSimple(ctx context.Context, cfg RenderConfig, imagePath, audioPath st
 
 	cmd := exec.CommandContext(ctx, cfg.FFmpegBin,
 		"-loop", "1", "-framerate", fmt.Sprintf("%d", OutputFPS), "-t", duration, "-i", imagePath,
-		"-i", audioPath,
+		"-t", duration, "-i", audioPath,
 		"-vf", vFilter,
 		"-af", aFilter,
 		"-c:v", "libx264", "-profile:v", "high", "-level", "4.0",

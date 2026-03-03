@@ -18,6 +18,9 @@ type DB struct {
 	pool *sql.DB
 }
 
+// Pool returns the underlying *sql.DB for direct access (e.g., ttsreliability ledger).
+func (d *DB) Pool() *sql.DB { return d.pool }
+
 // Open connects to Postgres and verifies the connection.
 func Open(dsn string) (*DB, error) {
 	pool, err := sql.Open("postgres", dsn)

@@ -357,6 +357,70 @@ func qaVoice(ctx context.Context, deps Deps, run *domain.Run, policy Policy) QAR
 		})
 	}
 
+	// Audio quality check: clipping, silence, peak levels.
+	audioStats, err := render.ProbeAudioQuality(ctx, deps.Render.FFmpegBin, asset.Path)
+	if err != nil {
+		log.Printf("qaVoice: audio quality probe failed (non-fatal): %v", err)
+	} else {
+		qualityDiag := map[string]any{
+			"peak_db":     audioStats.PeakDB,
+			"rms_db":      audioStats.RMSDb,
+			"flat_factor": audioStats.FlatFactor,
+			"silence_sec": audioStats.SilenceSec,
+		}
+
+		// Clipping check: flat_factor > 0 means clipped/distorted samples.
+		if audioStats.FlatFactor > 0 || audioStats.PeakDB >= -0.1 {
+			report.Pass = false
+			report.FailType = FailAudioClipping
+			report.Checks = append(report.Checks, QACheck{
+				Name: "audio_clipping", Pass: false,
+				Details: fmt.Sprintf("audio clipping detected (flat_factor=%.2f peak=%.1fdB)", audioStats.FlatFactor, audioStats.PeakDB),
+				Diag: qualityDiag,
+			})
+		} else {
+			report.Checks = append(report.Checks, QACheck{
+				Name: "audio_clipping", Pass: true,
+				Details: fmt.Sprintf("flat_factor=%.2f peak=%.1fdB", audioStats.FlatFactor, audioStats.PeakDB),
+			})
+		}
+
+		// Excessive silence check: >30% silence = likely TTS glitch.
+		if dur > 0 {
+			silenceRatio := audioStats.SilenceSec / dur
+			if silenceRatio > 0.30 {
+				report.Pass = false
+				report.FailType = FailAudioClipping // reuse for audio quality issues
+				report.Checks = append(report.Checks, QACheck{
+					Name: "audio_silence", Pass: false,
+					Details: fmt.Sprintf("%.0fs silence out of %.0fs total (%.0f%% > 30%%)", audioStats.SilenceSec, dur, silenceRatio*100),
+					Diag: qualityDiag,
+				})
+			} else {
+				report.Checks = append(report.Checks, QACheck{
+					Name: "audio_silence", Pass: true,
+					Details: fmt.Sprintf("%.0fs silence out of %.0fs (%.0f%%)", audioStats.SilenceSec, dur, silenceRatio*100),
+				})
+			}
+		}
+
+		// RMS too low = almost inaudible audio.
+		if audioStats.RMSDb < -40 {
+			report.Pass = false
+			report.FailType = FailAudioClipping
+			report.Checks = append(report.Checks, QACheck{
+				Name: "audio_level", Pass: false,
+				Details: fmt.Sprintf("RMS level too low: %.1fdB (min -40dB)", audioStats.RMSDb),
+				Diag: qualityDiag,
+			})
+		} else {
+			report.Checks = append(report.Checks, QACheck{
+				Name: "audio_level", Pass: true,
+				Details: fmt.Sprintf("RMS=%.1fdB", audioStats.RMSDb),
+			})
+		}
+	}
+
 	return report
 }
 
