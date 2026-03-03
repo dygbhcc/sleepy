@@ -126,6 +126,13 @@ func (o *Orchestrator) Run(ctx context.Context, job TTSJob) TTSResult {
 func (o *Orchestrator) processChunk(ctx context.Context, job TTSJob, chunk TTSChunk,
 	settings TTSSettings, budgetLeft int) (ChunkResult, int, float64) {
 
+	// Check if a previous run already produced a passing artifact for this chunk.
+	if result, ok := o.tryExistingArtifact(ctx, job, chunk); ok {
+		log.Printf("tts-reliability: [run=%s chunk=%d] reusing existing artifact (no credit spent)",
+			job.RunID, chunk.Index)
+		return result, 0, 0
+	}
+
 	attempts := 0
 	cost := 0.0
 	currentSettings := settings
@@ -245,6 +252,39 @@ func (o *Orchestrator) processChunk(ctx context.Context, job TTSJob, chunk TTSCh
 		Index:    chunk.Index,
 		FailType: FailBudgetExhausted,
 	}, attempts, cost
+}
+
+// tryExistingArtifact checks if a previous attempt already produced a passing audio file
+// for this chunk. If so, re-probes it and returns the result without spending TTS credits.
+func (o *Orchestrator) tryExistingArtifact(ctx context.Context, job TTSJob, chunk TTSChunk) (ChunkResult, bool) {
+	for attempt := 1; attempt <= MaxAttemptsPerChunk; attempt++ {
+		path := o.store.ChunkPath(job.RunID, chunk.Index, attempt)
+		info, err := os.Stat(path)
+		if err != nil || info.Size() == 0 {
+			continue
+		}
+
+		ffmpeg := job.FFmpegBin
+		if ffmpeg == "" {
+			ffmpeg = o.ffmpegBin
+		}
+		metrics, err := ProbeChunkMetrics(ctx, ffmpeg, path)
+		if err != nil {
+			continue
+		}
+
+		qa := QAChunk(metrics, o.th)
+		if qa.Pass {
+			return ChunkResult{
+				Index:     chunk.Index,
+				AudioPath: path,
+				Metrics:   metrics,
+				Pass:      true,
+				Attempt:   attempt,
+			}, true
+		}
+	}
+	return ChunkResult{}, false
 }
 
 func (o *Orchestrator) recordAttempt(ctx context.Context, runID string, chunkIdx, attemptNum, charCount int,

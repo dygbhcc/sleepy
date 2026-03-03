@@ -483,6 +483,16 @@ func (d *DB) ListRuns(ctx context.Context, status string) ([]domain.Run, error) 
 	return runs, rows.Err()
 }
 
+// HasRunToday returns true if a run with the given style was already created today.
+func (d *DB) HasRunToday(ctx context.Context, style string) (bool, error) {
+	var exists bool
+	err := d.pool.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM runs WHERE style=$1 AND created_at::date = CURRENT_DATE)`,
+		style,
+	).Scan(&exists)
+	return exists, err
+}
+
 // CreateRun inserts a new run and returns it.
 func (d *DB) CreateRun(ctx context.Context, series, episode, style, language string, durationMin int) (*domain.Run, error) {
 	r := &domain.Run{}

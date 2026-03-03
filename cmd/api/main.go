@@ -44,6 +44,8 @@ func main() {
 
 	workerMgr = worker.NewManager(store, assetRoot)
 
+	go startScheduler(context.Background(), store)
+
 	mux := http.NewServeMux()
 
 	// Frontend
