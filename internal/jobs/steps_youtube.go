@@ -51,8 +51,13 @@ func stepYouTube(ctx context.Context, deps Deps, run *domain.Run) error {
 	actualDurMin := int(math.Round(actualDurSec / 60))
 
 	title := formatYouTubeTitle(run, actualDurMin)
-	desc := fmt.Sprintf("A gentle sleep narration.\n\nSeries: %s\nEpisode: %s\nStyle: %s",
-		run.Series, run.Episode, run.Style)
+	desc := fmt.Sprintf(`This long-form cosmic narration is designed for deep sleep and quiet nights.
+A slow, calm story set in a peaceful universe, with no action, no tension, and no sudden changes.
+Simply let the voice and the steady rhythm accompany you as you rest.
+
+Series: %s
+Episode: %s
+Style: %s`, run.Series, run.Episode, run.Style)
 	tags := []string{"sleep", "narration", "relaxation", run.Style, run.Series}
 
 	thumbPath := findThumbnail(run.Style)

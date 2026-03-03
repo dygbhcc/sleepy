@@ -57,10 +57,12 @@ func (c *Client) pickBackground(style string) string {
 		return exact
 	}
 
-	// Prefix match: cosmos_1.jpg, cosmos_2.jpg, ...
-	matches, _ := filepath.Glob(filepath.Join(c.cfg.BackgroundsDir, lower+"_*.jpg"))
-	if len(matches) > 0 {
-		return matches[rand.Intn(len(matches))]
+	// Prefix match: cosmos_1.jpg, cosmos-2.jpg, ...
+	for _, sep := range []string{"_", "-"} {
+		matches, _ := filepath.Glob(filepath.Join(c.cfg.BackgroundsDir, lower+sep+"*.jpg"))
+		if len(matches) > 0 {
+			return matches[rand.Intn(len(matches))]
+		}
 	}
 
 	// Any jpg

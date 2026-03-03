@@ -101,8 +101,8 @@ func main() {
 			FFmpegBin:  ffmpegBin,
 			FFprobeBin: ffprobeBin,
 			FadeOutSec: 5.0,
-			MusicPath:  envOr("MUSIC_PATH", "assets/music/breakzstudios-calm-of-the-cosmos-165862.mp3"),
-			MusicVol:   0.5,
+			MusicPath:  envOr("MUSIC_PATH", "assets/music/Floating_in_Deep_Space.wav"),
+			MusicVol:   0.4,
 		},
 		FixEngine: jobs.NewFixEngine(outcomes),
 	}

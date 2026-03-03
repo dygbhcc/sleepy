@@ -2,8 +2,8 @@ package ttsreliability
 
 // Chunk size limits (words).
 const (
-	DefaultMinWordsPerChunk = 500
-	DefaultMaxWordsPerChunk = 900
+	DefaultMinWordsPerChunk = 200
+	DefaultMaxWordsPerChunk = 400
 )
 
 // Retry / budget limits.
@@ -20,7 +20,7 @@ const (
 	MinRMSThresholdDB     = -40.0 // RMS below → too quiet
 	MaxLUFSDelta          = 3.0   // max LUFS difference between chunks
 	MaxSpectralDelta      = 3.0   // max spectral proxy delta between chunks
-	MinSpectralProxy      = 5.0   // below → robotic/muffled
+	MinSpectralProxy      = 8.0   // below → robotic/muffled
 	TargetLUFS            = -16.0 // EBU R128 target
 )
 

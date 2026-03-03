@@ -42,7 +42,7 @@ func NewClient(cfg Config) *Client {
 		cfg.ModelID = "eleven_monolingual_v1"
 	}
 	if cfg.Speed <= 0 {
-		cfg.Speed = 0.80
+		cfg.Speed = 0.50
 	}
 	return &Client{
 		cfg:  cfg,
@@ -80,7 +80,7 @@ func (c *Client) callAPIWithOpts(ctx context.Context, text, outPath string, spee
 	if stability > 0 {
 		stab = stability
 	}
-	simBoost := 0.75
+	simBoost := 0.85
 	if similarityBoost > 0 {
 		simBoost = similarityBoost
 	}
@@ -92,6 +92,7 @@ func (c *Client) callAPIWithOpts(ctx context.Context, text, outPath string, spee
 		VoiceSettings: voiceSettings{
 			Stability:       stab,
 			SimilarityBoost: simBoost,
+			SpeakerBoost:    true,
 		},
 	})
 	if err != nil {
@@ -177,6 +178,7 @@ type ttsReq struct {
 type voiceSettings struct {
 	Stability       float64 `json:"stability"`
 	SimilarityBoost float64 `json:"similarity_boost"`
+	SpeakerBoost    bool    `json:"use_speaker_boost"`
 }
 
 func (c *Client) callAPI(ctx context.Context, text, outPath string) error {
@@ -186,7 +188,8 @@ func (c *Client) callAPI(ctx context.Context, text, outPath string) error {
 		Speed:   c.cfg.Speed,
 		VoiceSettings: voiceSettings{
 			Stability:       0.80,
-			SimilarityBoost: 0.75,
+			SimilarityBoost: 0.85,
+			SpeakerBoost:    true,
 		},
 	})
 	if err != nil {

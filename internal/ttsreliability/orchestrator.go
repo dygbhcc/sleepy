@@ -282,19 +282,18 @@ func (o *Orchestrator) assembleChunks(ctx context.Context, results []ChunkResult
 		return fmt.Errorf("write concat file: %w", err)
 	}
 
-	// Concat then loudnorm to final WAV.
-	mergedTmp := outPath + ".merged.tmp"
-	defer os.Remove(mergedTmp)
-
+	// Concat + re-encode + loudnorm in one pass to final WAV.
 	cmd := exec.CommandContext(ctx, o.ffmpegBin,
 		"-f", "concat", "-safe", "0", "-i", concatPath,
-		"-c", "copy", "-y", mergedTmp,
+		"-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+		"-ar", "44100", "-ac", "1",
+		"-y", outPath,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg concat: %s: %w", truncate(string(out), 300), err)
 	}
 
-	return applyLoudnormToOutput(ctx, o.ffmpegBin, mergedTmp, outPath)
+	return nil
 }
 
 // applyLoudnorm runs EBU R128 loudness normalization in-place.

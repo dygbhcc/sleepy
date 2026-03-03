@@ -141,7 +141,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 			FFprobeBin: ffprobeBin,
 			FadeOutSec: 5.0,
 			MusicPath:  settings.MusicPath,
-			MusicVol:   0.5,
+			MusicVol:   0.4,
 		},
 		FixEngine: jobs.NewFixEngine(outcomes),
 	}

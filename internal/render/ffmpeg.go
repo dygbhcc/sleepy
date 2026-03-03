@@ -35,7 +35,7 @@ func Render(ctx context.Context, cfg RenderConfig, imagePath, audioPath string, 
 		cfg.FadeOutSec = DefaultFadeOutSec
 	}
 	if cfg.MusicVol <= 0 {
-		cfg.MusicVol = 0.5
+		cfg.MusicVol = 0.4
 	}
 
 	fadeStart := math.Max(0, audioDurSec-cfg.FadeOutSec)
