@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -65,6 +66,7 @@ func main() {
 	mux.HandleFunc("PUT /api/runs/{id}/thumbnail", handleUpdateThumbnail)
 	mux.HandleFunc("GET /api/elevenlabs/voices", handleElevenLabsVoices)
 	mux.HandleFunc("GET /api/elevenlabs/models", handleElevenLabsModels)
+	mux.HandleFunc("GET /api/edge/voices", handleEdgeVoices)
 	mux.HandleFunc("GET /api/music", handleListMusic)
 	mux.HandleFunc("GET /api/settings", handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", handleUpdateSettings)
@@ -556,6 +558,47 @@ func handleElevenLabsModels(w http.ResponseWriter, r *http.Request) {
 		result = []model{}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleEdgeVoices runs `edge-tts --list-voices` and returns the results as JSON.
+func handleEdgeVoices(w http.ResponseWriter, r *http.Request) {
+	type edgeVoice struct {
+		Name   string `json:"name"`
+		Gender string `json:"gender"`
+		Locale string `json:"locale"`
+	}
+
+	cmd := exec.CommandContext(r.Context(), "python3", "-m", "edge_tts", "--list-voices")
+	out, err := cmd.Output()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "edge-tts list-voices failed")
+		return
+	}
+
+	var voices []edgeVoice
+	lines := strings.Split(string(out), "\n")
+	for i, line := range lines {
+		if i < 2 || strings.TrimSpace(line) == "" {
+			continue // skip header and separator
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		name := fields[0]
+		gender := fields[1]
+		// Extract locale from voice name (e.g. "en-US-AndrewNeural" → "en-US")
+		locale := ""
+		parts := strings.SplitN(name, "-", 3)
+		if len(parts) >= 2 {
+			locale = parts[0] + "-" + parts[1]
+		}
+		voices = append(voices, edgeVoice{Name: name, Gender: gender, Locale: locale})
+	}
+	if voices == nil {
+		voices = []edgeVoice{}
+	}
+	writeJSON(w, http.StatusOK, voices)
 }
 
 // handleListMusic lists audio files in assets/music/.

@@ -314,27 +314,7 @@ tr:hover{background:var(--surface2);cursor:pointer}
           <div class="form-group">
             <label data-i18n="edgeVoice"></label>
             <select id="sEdgeVoice">
-              <optgroup label="English">
-                <option value="en-US-AndrewNeural">en-US-AndrewNeural</option>
-                <option value="en-US-GuyNeural">en-US-GuyNeural</option>
-                <option value="en-US-BrianNeural">en-US-BrianNeural</option>
-              </optgroup>
-              <optgroup label="Turkce">
-                <option value="tr-TR-AhmetNeural">tr-TR-AhmetNeural</option>
-                <option value="tr-TR-EmelNeural">tr-TR-EmelNeural</option>
-              </optgroup>
-              <optgroup label="Portugues">
-                <option value="pt-BR-AntonioNeural">pt-BR-AntonioNeural</option>
-                <option value="pt-BR-FranciscaNeural">pt-BR-FranciscaNeural</option>
-              </optgroup>
-              <optgroup label="Espanol">
-                <option value="es-ES-AlvaroNeural">es-ES-AlvaroNeural</option>
-                <option value="es-MX-JorgeNeural">es-MX-JorgeNeural</option>
-              </optgroup>
-              <optgroup label="Italiano">
-                <option value="it-IT-DiegoNeural">it-IT-DiegoNeural</option>
-                <option value="it-IT-IsabellaNeural">it-IT-IsabellaNeural</option>
-              </optgroup>
+              <option value="">Loading...</option>
             </select>
           </div>
           <div class="form-group">
@@ -1399,6 +1379,45 @@ async function fetchVoices(selectID){
   }
 }
 
+async function fetchEdgeVoices(selectedVoice){
+  const sel=document.getElementById('sEdgeVoice');
+  sel.innerHTML='<option value="">Loading...</option>';
+  try{
+    const res=await fetch(API+'/api/edge/voices');
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const voices=await res.json();
+    sel.innerHTML='';
+    // Group by locale
+    const groups={};
+    voices.forEach(v=>{
+      const loc=v.locale||'Other';
+      if(!groups[loc])groups[loc]=[];
+      groups[loc].push(v);
+    });
+    // Sort locales, put en-US first
+    const locales=Object.keys(groups).sort((a,b)=>{
+      if(a==='en-US')return -1;if(b==='en-US')return 1;
+      if(a==='en-GB')return -1;if(b==='en-GB')return 1;
+      return a.localeCompare(b);
+    });
+    locales.forEach(loc=>{
+      const og=document.createElement('optgroup');
+      og.label=loc;
+      groups[loc].forEach(v=>{
+        const opt=document.createElement('option');
+        opt.value=v.name;
+        opt.textContent=v.name+' ('+v.gender+')';
+        og.appendChild(opt);
+      });
+      sel.appendChild(og);
+    });
+    if(selectedVoice)sel.value=selectedVoice;
+  }catch(e){
+    console.error('fetchEdgeVoices:',e);
+    sel.innerHTML='<option value="en-US-AndrewNeural">en-US-AndrewNeural</option>';
+  }
+}
+
 function previewVoice(){
   const vid=document.getElementById('sElevenVoiceID').value;
   if(!vid||!window._voicePreviews||!window._voicePreviews[vid])return;
@@ -1468,7 +1487,7 @@ async function loadSettings(){
     const speedVal=s.elevenlabs_speed||0.80;
     document.getElementById('sElevenSpeed').value=speedVal;
     document.getElementById('sElevenSpeedVal').textContent=parseFloat(speedVal).toFixed(2);
-    if(s.edge_voice)document.getElementById('sEdgeVoice').value=s.edge_voice;
+    fetchEdgeVoices(s.edge_voice||'en-US-AndrewNeural');
     if(s.edge_rate)document.getElementById('sEdgeRate').value=s.edge_rate;
     document.getElementById('sNormalize').checked=s.normalize!==false;
     // Load ambient tracks
