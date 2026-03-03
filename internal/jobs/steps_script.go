@@ -37,8 +37,19 @@ func stepScript(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 	}
 
 	// In continuation mode, merge existing script + new paragraphs.
+	// Cap at 2x target words to prevent exponential growth across retries.
 	if existingScript != "" {
-		result.Markdown = existingScript + "\n\n" + result.Markdown
+		merged := existingScript + "\n\n" + result.Markdown
+		maxWords := policy.TargetWords * 2
+		if maxWords == 0 {
+			maxWords = 10000
+		}
+		words := strings.Fields(merged)
+		if len(words) > maxWords {
+			merged = strings.Join(words[:maxWords], " ")
+			log.Printf("step_script: continuation capped at %d words (limit %d)", maxWords, maxWords)
+		}
+		result.Markdown = merged
 		result.SSML = llm.MarkdownToSSML(result.Markdown)
 		log.Printf("step_script: continuation merged (%d total words)",
 			len(strings.Fields(result.Markdown)))

@@ -81,6 +81,22 @@ func (l *Ledger) GetTotalAttempts(ctx context.Context, runID string) (int, error
 	return count, nil
 }
 
+// GetAttemptKey returns the idempotency key for a specific attempt, or "" if not found.
+func (l *Ledger) GetAttemptKey(ctx context.Context, runID string, chunkIdx, attemptNum int) (string, error) {
+	var key sql.NullString
+	err := l.db.QueryRowContext(ctx,
+		`SELECT idempotency_key FROM tts_attempts WHERE run_id=$1 AND chunk_index=$2 AND attempt_num=$3 LIMIT 1`,
+		runID, chunkIdx, attemptNum,
+	).Scan(&key)
+	if err != nil {
+		return "", err
+	}
+	if !key.Valid {
+		return "", nil
+	}
+	return key.String, nil
+}
+
 // IdempotencyKey builds a deterministic key for deduplication.
 func IdempotencyKey(runID string, chunkIdx, attemptNum int, settings TTSSettings) string {
 	sJSON, _ := json.Marshal(settings)

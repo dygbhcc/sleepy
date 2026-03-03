@@ -294,6 +294,22 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 			}
 		}
 
+		// Clear downstream hashes so idempotency doesn't skip re-generation.
+		if fix.Action == "loopback" {
+			switch fix.TargetStatus {
+			case domain.StatusPending:
+				_ = deps.DB.UpdateRunHash(ctx, run.ID, "script_hash", "")
+				_ = deps.DB.UpdateRunHash(ctx, run.ID, "voice_hash", "")
+				_ = deps.DB.UpdateRunHash(ctx, run.ID, "render_hash", "")
+			case domain.StatusScripted:
+				_ = deps.DB.UpdateRunHash(ctx, run.ID, "voice_hash", "")
+				_ = deps.DB.UpdateRunHash(ctx, run.ID, "render_hash", "")
+			case domain.StatusVoiced, domain.StatusThumbnailed:
+				_ = deps.DB.UpdateRunHash(ctx, run.ID, "render_hash", "")
+			}
+			log.Printf("worker[%s]: cleared downstream hashes for loopback to %s", workerID, fix.TargetStatus)
+		}
+
 		if err := deps.DB.UpdateRunStatus(ctx, run.ID, fix.TargetStatus); err != nil {
 			return fmt.Errorf("reset to %s: %w", fix.TargetStatus, err)
 		}

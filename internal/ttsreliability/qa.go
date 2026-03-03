@@ -62,7 +62,9 @@ func QAChunk(metrics QAMetrics, th Thresholds) QAResult {
 	}
 
 	// Robotic artifact: narrow spectral spread (muffled/mechanical).
-	if metrics.SpectralProxy < th.MinSpectralProxy && metrics.SpectralProxy > 0 {
+	// Skip for very short chunks (<5s) or quiet chunks (RMS < -35dB) where metrics are unreliable.
+	if metrics.SpectralProxy < th.MinSpectralProxy && metrics.SpectralProxy > 0 &&
+		metrics.DurationSec >= 5.0 && metrics.RMSDb > -35.0 {
 		return QAResult{
 			Pass:     false,
 			FailType: FailRoboticArtifact,

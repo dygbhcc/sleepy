@@ -94,19 +94,26 @@ func (o *Orchestrator) Run(ctx context.Context, job TTSJob) TTSResult {
 		}
 	}
 
-	// Assemble chunks into final audio.
+	// Assemble chunks into final audio (retry up to 3 times for transient errors).
 	finalPath := job.OutputPath
 	if finalPath == "" {
 		finalPath = o.store.FinalPath(job.RunID)
 	}
-	if err := o.assembleChunks(ctx, results, finalPath); err != nil {
-		log.Printf("tts-reliability: assembly failed: %v", err)
+	var assemblyErr error
+	for assemblyAttempt := 1; assemblyAttempt <= 3; assemblyAttempt++ {
+		assemblyErr = o.assembleChunks(ctx, results, finalPath)
+		if assemblyErr == nil {
+			break
+		}
+		log.Printf("tts-reliability: assembly attempt %d/3 failed: %v", assemblyAttempt, assemblyErr)
+	}
+	if assemblyErr != nil {
 		return TTSResult{
 			FailType:      FailProviderError,
 			TotalAttempts: totalAttempts,
 			TotalCostUSD:  totalCost,
 			Chunks:        results,
-			Details:       fmt.Sprintf("assembly: %v", err),
+			Details:       fmt.Sprintf("assembly (3 attempts): %v", assemblyErr),
 		}
 	}
 
@@ -255,13 +262,22 @@ func (o *Orchestrator) processChunk(ctx context.Context, job TTSJob, chunk TTSCh
 }
 
 // tryExistingArtifact checks if a previous attempt already produced a passing audio file
-// for this chunk. If so, re-probes it and returns the result without spending TTS credits.
+// for this chunk with matching settings. Re-probes it and returns without spending TTS credits.
 func (o *Orchestrator) tryExistingArtifact(ctx context.Context, job TTSJob, chunk TTSChunk) (ChunkResult, bool) {
 	for attempt := 1; attempt <= MaxAttemptsPerChunk; attempt++ {
 		path := o.store.ChunkPath(job.RunID, chunk.Index, attempt)
 		info, err := os.Stat(path)
 		if err != nil || info.Size() == 0 {
 			continue
+		}
+
+		// Verify the artifact was created with the same settings via idempotency key.
+		expectedKey := IdempotencyKey(job.RunID, chunk.Index, attempt, job.Settings)
+		if o.ledger != nil {
+			recorded, err := o.ledger.GetAttemptKey(ctx, job.RunID, chunk.Index, attempt)
+			if err == nil && recorded != "" && recorded != expectedKey {
+				continue // settings changed, don't reuse
+			}
 		}
 
 		ffmpeg := job.FFmpegBin
