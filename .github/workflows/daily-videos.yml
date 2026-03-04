@@ -33,9 +33,6 @@ jobs:
       EDGE_VOICE: en-US-AndrewMultilingualNeural
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: gpt-5.2
-      YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
-      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
 
     steps:
       - name: Checkout
@@ -49,7 +46,7 @@ jobs:
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Install edge-tts (fallback)
+      - name: Install edge-tts
         run: pip install edge-tts
 
       - name: Build binaries
@@ -64,6 +61,25 @@ jobs:
             PGPASSWORD=sleepy psql -h localhost -U sleepy -d sleepy -f "$f"
           done
 
+      - name: Configure YouTube token
+        env:
+          YT_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        if: env.YT_REFRESH_TOKEN != ''
+        run: |
+          PGPASSWORD=sleepy psql -h localhost -U sleepy -d sleepy -c "
+            UPDATE worker_settings SET
+              youtube_enabled = true,
+              youtube_privacy = 'public',
+              youtube_client_id = '${YT_CLIENT_ID}',
+              youtube_client_secret = '${YT_CLIENT_SECRET}',
+              youtube_refresh_token = '${YT_REFRESH_TOKEN}',
+              youtube_access_token = 'pending',
+              youtube_token_expiry = '1970-01-01'
+            WHERE id = 1;
+          "
+
       - name: Create asset directories
         run: mkdir -p tmp/assets
 
@@ -74,8 +90,7 @@ jobs:
           ./bin/seed -series Myth -style Myth -episode "$(date +%Y-%m-%d) Myth" -duration 30
 
       - name: Run worker (process all runs)
-        run: |
-          WORKER_ONE_SHOT=1 ./bin/worker
+        run: WORKER_ONE_SHOT=1 ./bin/worker
         timeout-minutes: 150
 
       - name: Upload artifacts
