@@ -1,0 +1,87 @@
+name: Daily Sleep Videos
+
+on:
+  schedule:
+    # 10 PM EST = 03:00 UTC (EST is UTC-5)
+    - cron: '0 3 * * *'
+  workflow_dispatch: # manual trigger
+
+jobs:
+  generate-videos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180  # 3 hours max
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sleepy
+          POSTGRES_USER: sleepy
+          POSTGRES_PASSWORD: sleepy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U sleepy"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      PG_DSN: postgres://sleepy:sleepy@localhost:5432/sleepy?sslmode=disable
+      ASSET_ROOT: tmp/assets
+      MODE: test
+      EDGE_VOICE: en-US-AndrewMultilingualNeural
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5.2
+      YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install edge-tts (fallback)
+        run: pip install edge-tts
+
+      - name: Build binaries
+        run: |
+          go build -o bin/seed ./cmd/seed
+          go build -o bin/worker ./cmd/worker
+
+      - name: Run migrations
+        run: |
+          for f in internal/db/migrations/*.sql; do
+            echo "Running $f..."
+            PGPASSWORD=sleepy psql -h localhost -U sleepy -d sleepy -f "$f"
+          done
+
+      - name: Create asset directories
+        run: mkdir -p tmp/assets
+
+      - name: Seed daily runs
+        run: |
+          ./bin/seed -series Cosmos -style Cosmos -episode "$(date +%Y-%m-%d) Cosmos" -duration 30
+          ./bin/seed -series Earthside -style Earthside -episode "$(date +%Y-%m-%d) Earthside" -duration 30
+          ./bin/seed -series Myth -style Myth -episode "$(date +%Y-%m-%d) Myth" -duration 30
+
+      - name: Run worker (process all runs)
+        run: |
+          WORKER_ONE_SHOT=1 ./bin/worker
+        timeout-minutes: 150
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-videos-${{ github.run_number }}
+          path: tmp/assets/*/video.mp4
+          retention-days: 7
