@@ -14,7 +14,7 @@ import (
 )
 
 // Scopes required for uploading videos.
-var Scopes = []string{yt.YoutubeUploadScope}
+var Scopes = []string{yt.YoutubeUploadScope, yt.YoutubeScope}
 
 // TokenStore is used to persist and refresh OAuth2 tokens.
 type TokenStore interface {
