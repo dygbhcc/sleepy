@@ -31,8 +31,8 @@ jobs:
       ASSET_ROOT: tmp/assets
       MODE: test
       EDGE_VOICE: en-US-AndrewMultilingualNeural
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENAI_MODEL: gpt-5.2
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: gemini-2.5-flash
 
     steps:
       - name: Checkout

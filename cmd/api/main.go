@@ -637,9 +637,9 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mode":               s.Mode,
-		"openai_key_set":     os.Getenv("OPENAI_API_KEY") != "",
-		"openai_base_url":    s.OpenAIBaseURL,
-		"openai_model":       s.OpenAIModel,
+		"gemini_key_set":     os.Getenv("GEMINI_API_KEY") != "",
+		"gemini_base_url":    s.GeminiBaseURL,
+		"gemini_model":       s.GeminiModel,
 		"elevenlabs_key_set": os.Getenv("ELEVENLABS_API_KEY") != "",
 		"elevenlabs_voice_id": s.ElevenLabsVoiceID,
 		"elevenlabs_model_id": s.ElevenLabsModelID,
@@ -660,8 +660,8 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Mode              *string  `json:"mode"`
-		OpenAIBaseURL     *string  `json:"openai_base_url"`
-		OpenAIModel       *string  `json:"openai_model"`
+		GeminiBaseURL     *string  `json:"gemini_base_url"`
+		GeminiModel       *string  `json:"gemini_model"`
 		ElevenLabsVoiceID *string  `json:"elevenlabs_voice_id"`
 		ElevenLabsModelID *string  `json:"elevenlabs_model_id"`
 		ElevenLabsSpeed   *float64 `json:"elevenlabs_speed"`
@@ -689,11 +689,11 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if req.Mode != nil {
 		s.Mode = *req.Mode
 	}
-	if req.OpenAIBaseURL != nil {
-		s.OpenAIBaseURL = *req.OpenAIBaseURL
+	if req.GeminiBaseURL != nil {
+		s.GeminiBaseURL = *req.GeminiBaseURL
 	}
-	if req.OpenAIModel != nil {
-		s.OpenAIModel = *req.OpenAIModel
+	if req.GeminiModel != nil {
+		s.GeminiModel = *req.GeminiModel
 	}
 	if req.ElevenLabsVoiceID != nil {
 		s.ElevenLabsVoiceID = *req.ElevenLabsVoiceID
@@ -744,8 +744,8 @@ func handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required API keys (from env vars).
-	if os.Getenv("OPENAI_API_KEY") == "" {
-		writeErr(w, http.StatusBadRequest, "OPENAI_API_KEY env var is required")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		writeErr(w, http.StatusBadRequest, "GEMINI_API_KEY env var is required")
 		return
 	}
 	if s.Mode == "prod" {

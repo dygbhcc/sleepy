@@ -21,7 +21,7 @@ import (
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	// MODE: "test" (OpenAI + Edge TTS) or "prod" (OpenAI + ElevenLabs)
+	// MODE: "test" (Gemini + Edge TTS) or "prod" (Gemini + ElevenLabs)
 	mode := envOr("MODE", "test")
 
 	pgDSN := mustEnv("PG_DSN")
@@ -41,12 +41,12 @@ func main() {
 
 	switch mode {
 	case "prod":
-		log.Println("=== MODE: prod (OpenAI + ElevenLabs) ===")
+		log.Println("=== MODE: prod (Gemini + ElevenLabs) ===")
 
 		llmClient = llm.NewClient(llm.Config{
-			BaseURL: envOr("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-			APIKey:  mustEnv("OPENAI_API_KEY"),
-			Model:   envOr("OPENAI_MODEL", "gpt-4o"),
+			BaseURL: envOr("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
+			APIKey:  mustEnv("GEMINI_API_KEY"),
+			Model:   envOr("GEMINI_MODEL", "gemini-2.5-pro"),
 		})
 
 		elevenSpeed := 0.80
@@ -63,12 +63,12 @@ func main() {
 		})
 
 	default: // "test"
-		log.Println("=== MODE: test (OpenAI + Edge TTS) ===")
+		log.Println("=== MODE: test (Gemini + Edge TTS) ===")
 
 		llmClient = llm.NewClient(llm.Config{
-			BaseURL: envOr("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-			APIKey:  mustEnv("OPENAI_API_KEY"),
-			Model:   envOr("OPENAI_MODEL", "gpt-4o-mini"),
+			BaseURL: envOr("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
+			APIKey:  mustEnv("GEMINI_API_KEY"),
+			Model:   envOr("GEMINI_MODEL", "gemini-2.5-flash"),
 		})
 
 		ttsProvider = tts.NewEdgeClient(tts.EdgeConfig{

@@ -293,8 +293,8 @@ tr:hover{background:var(--surface2);cursor:pointer}
       <div class="settings-section">
         <div class="settings-grid">
           <div class="form-group">
-            <label>OPENAI_API_KEY</label>
-            <span id="envOpenAI" class="env-status"></span>
+            <label>GEMINI_API_KEY</label>
+            <span id="envGemini" class="env-status"></span>
           </div>
           <div class="form-group">
             <label>ELEVENLABS_API_KEY</label>
@@ -308,8 +308,8 @@ tr:hover{background:var(--surface2);cursor:pointer}
         <h3>LLM + Edge TTS</h3>
         <div class="settings-grid">
           <div class="form-group">
-            <label>OpenAI Model</label>
-            <input type="text" id="sTestOpenAIModel" placeholder="gpt-4o-mini">
+            <label>Gemini Model</label>
+            <input type="text" id="sTestGeminiModel" placeholder="gemini-2.5-flash">
           </div>
           <div class="form-group">
             <label data-i18n="edgeVoice"></label>
@@ -331,15 +331,15 @@ tr:hover{background:var(--surface2);cursor:pointer}
 
       <!-- Prod mode fields -->
       <div id="prodFields" class="settings-section" style="display:none">
-        <h3>OpenAI + ElevenLabs</h3>
+        <h3>Gemini + ElevenLabs</h3>
         <div class="settings-grid">
           <div class="form-group">
-            <label data-i18n="openaiBaseUrl"></label>
-            <input type="text" id="sOpenAIBaseURL" placeholder="https://api.openai.com/v1">
+            <label data-i18n="geminiBaseUrl"></label>
+            <input type="text" id="sGeminiBaseURL" placeholder="https://generativelanguage.googleapis.com/v1beta/openai">
           </div>
           <div class="form-group">
-            <label data-i18n="openaiModel"></label>
-            <input type="text" id="sOpenAIModel" placeholder="gpt-4o">
+            <label data-i18n="geminiModel"></label>
+            <input type="text" id="sGeminiModel" placeholder="gemini-2.5-pro">
           </div>
           <div class="form-group">
             <label data-i18n="elevenVoiceId"></label>
@@ -474,15 +474,15 @@ const LANGS = {
     settingsTitle: 'Worker Settings',
     modeLabel: 'Mode',
     modeTest: 'Test (Edge TTS)',
-    modeProd: 'Prod (OpenAI + ElevenLabs)',
+    modeProd: 'Prod (Gemini + ElevenLabs)',
     edgeVoice: 'Edge Voice',
     edgeRate: 'Edge Rate',
     edgeRateVerySlow: 'Very slow',
     edgeRateSlow: 'Slow',
     edgeRateSlightlySlow: 'Slightly slow',
     edgeRateNormal: 'Normal',
-    openaiBaseUrl: 'Base URL',
-    openaiModel: 'Model',
+    geminiBaseUrl: 'Base URL',
+    geminiModel: 'Model',
     elevenVoiceId: 'Voice',
     elevenModelId: 'Model ID',
     elevenSpeed: 'Speed',
@@ -551,15 +551,15 @@ const LANGS = {
     settingsTitle: 'Worker Ayarlari',
     modeLabel: 'Mod',
     modeTest: 'Test (Edge TTS)',
-    modeProd: 'Prod (OpenAI + ElevenLabs)',
+    modeProd: 'Prod (Gemini + ElevenLabs)',
     edgeVoice: 'Edge Ses',
     edgeRate: 'Edge Hiz',
     edgeRateVerySlow: 'Cok yavas',
     edgeRateSlow: 'Yavas',
     edgeRateSlightlySlow: 'Biraz yavas',
     edgeRateNormal: 'Normal',
-    openaiBaseUrl: 'Base URL',
-    openaiModel: 'Model',
+    geminiBaseUrl: 'Base URL',
+    geminiModel: 'Model',
     elevenVoiceId: 'Ses',
     elevenModelId: 'Model ID',
     elevenSpeed: 'Hiz',
@@ -628,15 +628,15 @@ const LANGS = {
     settingsTitle: 'Configuracoes do Worker',
     modeLabel: 'Modo',
     modeTest: 'Teste (Edge TTS)',
-    modeProd: 'Prod (OpenAI + ElevenLabs)',
+    modeProd: 'Prod (Gemini + ElevenLabs)',
     edgeVoice: 'Voz Edge',
     edgeRate: 'Taxa Edge',
     edgeRateVerySlow: 'Muito lento',
     edgeRateSlow: 'Lento',
     edgeRateSlightlySlow: 'Um pouco lento',
     edgeRateNormal: 'Normal',
-    openaiBaseUrl: 'URL Base',
-    openaiModel: 'Modelo',
+    geminiBaseUrl: 'URL Base',
+    geminiModel: 'Modelo',
     elevenVoiceId: 'Voz',
     elevenModelId: 'ID do Modelo',
     elevenSpeed: 'Velocidade',
@@ -705,15 +705,15 @@ const LANGS = {
     settingsTitle: 'Configuracion del Worker',
     modeLabel: 'Modo',
     modeTest: 'Prueba (Edge TTS)',
-    modeProd: 'Prod (OpenAI + ElevenLabs)',
+    modeProd: 'Prod (Gemini + ElevenLabs)',
     edgeVoice: 'Voz Edge',
     edgeRate: 'Velocidad Edge',
     edgeRateVerySlow: 'Muy lento',
     edgeRateSlow: 'Lento',
     edgeRateSlightlySlow: 'Un poco lento',
     edgeRateNormal: 'Normal',
-    openaiBaseUrl: 'URL Base',
-    openaiModel: 'Modelo',
+    geminiBaseUrl: 'URL Base',
+    geminiModel: 'Modelo',
     elevenVoiceId: 'Voz',
     elevenModelId: 'ID de Modelo',
     elevenSpeed: 'Velocidad',
@@ -782,15 +782,15 @@ const LANGS = {
     settingsTitle: 'Impostazioni Worker',
     modeLabel: 'Modalita',
     modeTest: 'Test (Edge TTS)',
-    modeProd: 'Prod (OpenAI + ElevenLabs)',
+    modeProd: 'Prod (Gemini + ElevenLabs)',
     edgeVoice: 'Voce Edge',
     edgeRate: 'Velocita Edge',
     edgeRateVerySlow: 'Molto lento',
     edgeRateSlow: 'Lento',
     edgeRateSlightlySlow: 'Un po lento',
     edgeRateNormal: 'Normale',
-    openaiBaseUrl: 'URL Base',
-    openaiModel: 'Modello',
+    geminiBaseUrl: 'URL Base',
+    geminiModel: 'Modello',
     elevenVoiceId: 'Voce',
     elevenModelId: 'ID Modello',
     elevenSpeed: 'Velocita',
@@ -1473,11 +1473,11 @@ async function loadSettings(){
     const s=await res.json();
     setSettingsMode(s.mode||'test');
     // Show env var status
-    setEnvStatus('envOpenAI',s.openai_key_set);
+    setEnvStatus('envGemini',s.gemini_key_set);
     setEnvStatus('envElevenLabs',s.elevenlabs_key_set);
-    document.getElementById('sTestOpenAIModel').value=s.openai_model||'gpt-4o-mini';
-    document.getElementById('sOpenAIBaseURL').value=s.openai_base_url||'';
-    document.getElementById('sOpenAIModel').value=s.openai_model||'';
+    document.getElementById('sTestGeminiModel').value=s.gemini_model||'gemini-2.5-flash';
+    document.getElementById('sGeminiBaseURL').value=s.gemini_base_url||'';
+    document.getElementById('sGeminiModel').value=s.gemini_model||'';
     // Store voice_id so we can set it after fetching voices.
     window._pendingVoiceID=s.elevenlabs_voice_id||'';
     if(s.elevenlabs_key_set){
@@ -1504,8 +1504,8 @@ async function loadSettings(){
 async function saveSettings(){
   const body={
     mode:settingsMode,
-    openai_base_url:settingsMode==='prod'?document.getElementById('sOpenAIBaseURL').value:'',
-    openai_model:settingsMode==='test'?document.getElementById('sTestOpenAIModel').value:document.getElementById('sOpenAIModel').value,
+    gemini_base_url:settingsMode==='prod'?document.getElementById('sGeminiBaseURL').value:'',
+    gemini_model:settingsMode==='test'?document.getElementById('sTestGeminiModel').value:document.getElementById('sGeminiModel').value,
     elevenlabs_voice_id:document.getElementById('sElevenVoiceID').value,
     elevenlabs_model_id:document.getElementById('sElevenModelID').value,
     elevenlabs_speed:parseFloat(document.getElementById('sElevenSpeed').value)||0.80,

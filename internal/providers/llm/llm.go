@@ -31,9 +31,9 @@ type TitleRequest struct {
 	DurationMin   int
 }
 
-// Config holds OpenAI-compatible API settings.
+// Config holds LLM API settings (Gemini or any OpenAI-compatible endpoint).
 type Config struct {
-	BaseURL string // e.g. https://api.openai.com/v1
+	BaseURL string // e.g. https://generativelanguage.googleapis.com/v1beta/openai
 	APIKey  string
 	Model   string // e.g. gpt-4o
 }
@@ -67,7 +67,7 @@ type ScriptResult struct {
 	SSML     string
 }
 
-// Client wraps the OpenAI-compatible chat completions API.
+// Client wraps an OpenAI-compatible chat completions API (Gemini, OpenAI, etc.).
 type Client struct {
 	cfg  Config
 	http *http.Client
@@ -76,10 +76,10 @@ type Client struct {
 // NewClient creates a configured LLM client.
 func NewClient(cfg Config) *Client {
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://api.openai.com/v1"
+		cfg.BaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 	}
 	if cfg.Model == "" {
-		cfg.Model = "gpt-4o"
+		cfg.Model = "gemini-2.5-flash"
 	}
 	return &Client{
 		cfg:  cfg,

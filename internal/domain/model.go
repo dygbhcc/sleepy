@@ -79,9 +79,9 @@ type WorkerSettings struct {
 	MaxInflightTTS       int    // max concurrent TTS workers (default 1)
 	MaxInflightRender    int    // max concurrent render workers (default 1)
 
-	OpenAIAPIKey      string
-	OpenAIBaseURL     string
-	OpenAIModel       string
+	GeminiAPIKey  string
+	GeminiBaseURL string
+	GeminiModel   string
 	ElevenLabsAPIKey  string
 	ElevenLabsVoiceID string
 	ElevenLabsModelID string

@@ -49,25 +49,25 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 
 	var ttsProvider jobs.TTSSynthesizer
 
-	openaiKey := os.Getenv("OPENAI_API_KEY")
-	if openaiKey == "" {
-		return fmt.Errorf("OPENAI_API_KEY env var is required")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	if geminiKey == "" {
+		return fmt.Errorf("GEMINI_API_KEY env var is required")
 	}
 
-	baseURL := settings.OpenAIBaseURL
+	baseURL := settings.GeminiBaseURL
 	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
+		baseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 	}
-	model := settings.OpenAIModel
+	model := settings.GeminiModel
 	if model == "" {
 		if settings.Mode == "prod" {
-			model = "gpt-4o"
+			model = "gemini-2.5-pro"
 		} else {
-			model = "gpt-4o-mini"
+			model = "gemini-2.5-flash"
 		}
 	}
-	llmClient := llm.NewClient(llm.Config{BaseURL: baseURL, APIKey: openaiKey, Model: model})
-	log.Printf("worker-manager: LLM provider: openai (model=%s)", model)
+	llmClient := llm.NewClient(llm.Config{BaseURL: baseURL, APIKey: geminiKey, Model: model})
+	log.Printf("worker-manager: LLM provider: gemini (model=%s)", model)
 
 	switch settings.Mode {
 	case "prod":
