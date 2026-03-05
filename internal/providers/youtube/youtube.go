@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 	yt "google.golang.org/api/youtube/v3"
 )
@@ -123,11 +124,12 @@ func (c *Client) Upload(ctx context.Context, req UploadRequest) (string, error) 
 		},
 	}
 
-	log.Printf("youtube: uploading %q (%s)", req.Title, req.FilePath)
+	fi, _ := file.Stat()
+	log.Printf("youtube: uploading %q (%s, %.1f MB)", req.Title, req.FilePath, float64(fi.Size())/(1024*1024))
 	start := time.Now()
 
 	call := svc.Videos.Insert([]string{"snippet", "status"}, video)
-	call.Media(file)
+	call.Media(file, googleapi.ContentType("video/mp4"), googleapi.ChunkSize(32*1024*1024))
 
 	resp, err := call.Context(ctx).Do()
 	if err != nil {

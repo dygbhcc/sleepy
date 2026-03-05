@@ -102,7 +102,7 @@ func main() {
 			FFprobeBin: ffprobeBin,
 			FadeOutSec: 5.0,
 			MusicPath:  envOr("MUSIC_PATH", "assets/music/Floating_in_Deep_Space.wav"),
-			MusicVol:   0.4,
+			MusicVol:   0.5,
 		},
 		FixEngine: jobs.NewFixEngine(outcomes),
 	}

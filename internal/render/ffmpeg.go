@@ -35,7 +35,7 @@ func Render(ctx context.Context, cfg RenderConfig, imagePath, audioPath string, 
 		cfg.FadeOutSec = DefaultFadeOutSec
 	}
 	if cfg.MusicVol <= 0 {
-		cfg.MusicVol = 0.4
+		cfg.MusicVol = 0.5
 	}
 
 	fadeStart := math.Max(0, audioDurSec-cfg.FadeOutSec)
@@ -65,15 +65,19 @@ func Render(ctx context.Context, cfg RenderConfig, imagePath, audioPath string, 
 }
 
 // renderWithMusic mixes narration (full volume) + ambient music (MusicVol) then applies fade-out.
+// Music is looped (-stream_loop -1) so it never runs out before narration ends.
+// amix uses duration=first (narration) and normalize=0 to prevent automatic volume halving.
 func renderWithMusic(ctx context.Context, cfg RenderConfig, imagePath, audioPath string, audioDurSec, fadeStart float64, vFilter, outPath string) error {
 	// Everything in one filter_complex: video + audio mixing.
+	// normalize=0 prevents amix from dividing each input's volume by N.
+	// duration=first makes the mix last as long as the narration (first amix input).
 	fc := fmt.Sprintf(
 		"[0:v]%s[vout];"+
 			"[1:a]volume=1.0[narr];"+
-			"[2:a]atrim=0:%.2f,volume=%.2f[music];"+
-			"[narr][music]amix=inputs=2:duration=shortest,afade=t=out:st=%.2f:d=%.2f[aout]",
+			"[2:a]volume=%.2f[music];"+
+			"[narr][music]amix=inputs=2:duration=first:normalize=0,afade=t=out:st=%.2f:d=%.2f[aout]",
 		vFilter,
-		audioDurSec+2, cfg.MusicVol,
+		cfg.MusicVol,
 		fadeStart, cfg.FadeOutSec,
 	)
 
@@ -82,7 +86,7 @@ func renderWithMusic(ctx context.Context, cfg RenderConfig, imagePath, audioPath
 	cmd := exec.CommandContext(ctx, cfg.FFmpegBin,
 		"-loop", "1", "-framerate", fmt.Sprintf("%d", OutputFPS), "-t", duration, "-i", imagePath,
 		"-t", duration, "-i", audioPath,
-		"-i", cfg.MusicPath,
+		"-stream_loop", "-1", "-i", cfg.MusicPath,
 		"-filter_complex", fc,
 		"-map", "[vout]", "-map", "[aout]",
 		"-c:v", "libx264", "-profile:v", "high", "-level", "4.0",
