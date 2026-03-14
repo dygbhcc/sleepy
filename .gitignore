@@ -1,3 +1,5 @@
 .DS_Store
 tmp/
 .claude/
+assets/music/*
+data/artifacts/tts/*
