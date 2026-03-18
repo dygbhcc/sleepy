@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"sleepy/internal/db"
 	"sleepy/internal/domain"
 	"sleepy/internal/jobs"
+	"sleepy/internal/logbuf"
 	"sleepy/internal/worker"
 )
 
@@ -21,9 +23,11 @@ var assetRoot string
 var workerMgr *worker.Manager
 
 func main() {
+	log.SetOutput(logbuf.MultiWriter(os.Stderr))
+
 	dsn := os.Getenv("PG_DSN")
 	if dsn == "" {
-		dsn = "postgres://localhost:5432/sleepy?sslmode=disable"
+		dsn = "postgres://sleepy:sleepy@localhost:5433/sleepy?sslmode=disable"
 	}
 	assetRoot = os.Getenv("ASSET_ROOT")
 	if assetRoot == "" {
@@ -38,6 +42,54 @@ func main() {
 	defer store.Close()
 
 	workerMgr = worker.NewManager(store, assetRoot)
+
+	// Seed settings from env vars if DB fields are empty.
+	if s, err := store.GetWorkerSettings(context.Background()); err == nil {
+		changed := false
+		if s.GroqAPIKey == "" {
+			if v := os.Getenv("GROQ_API_KEY"); v != "" {
+				s.GroqAPIKey = v
+				changed = true
+			}
+		}
+		if s.OpenAIAPIKey == "" {
+			if v := os.Getenv("OPENAI_API_KEY"); v != "" {
+				s.OpenAIAPIKey = v
+				changed = true
+			}
+		}
+		if s.OpenAIBaseURL == "" {
+			if v := os.Getenv("OPENAI_BASE_URL"); v != "" {
+				s.OpenAIBaseURL = v
+				changed = true
+			}
+		}
+		if s.OpenAIModel == "" {
+			if v := os.Getenv("OPENAI_MODEL"); v != "" {
+				s.OpenAIModel = v
+				changed = true
+			}
+		}
+		if s.ElevenLabsAPIKey == "" {
+			if v := os.Getenv("ELEVENLABS_API_KEY"); v != "" {
+				s.ElevenLabsAPIKey = v
+				changed = true
+			}
+		}
+		if s.ElevenLabsVoiceID == "" {
+			if v := os.Getenv("ELEVENLABS_VOICE_ID"); v != "" {
+				s.ElevenLabsVoiceID = v
+				changed = true
+			}
+		}
+		if changed {
+			if err := store.SaveWorkerSettings(context.Background(), s); err != nil {
+				log.Printf("warning: could not seed settings from env: %v", err)
+			} else {
+				log.Println("seeded worker settings from environment variables")
+			}
+		}
+	}
 
 	mux := http.NewServeMux()
 
@@ -60,6 +112,7 @@ func main() {
 	mux.HandleFunc("POST /api/worker/start", handleWorkerStart)
 	mux.HandleFunc("POST /api/worker/stop", handleWorkerStop)
 	mux.HandleFunc("GET /api/worker/status", handleWorkerStatus)
+	mux.HandleFunc("GET /api/logs", handleGetLogs)
 	mux.HandleFunc("GET /assets/{runID}/{file}", handleServeAsset)
 
 	addr := os.Getenv("ADDR")
@@ -456,6 +509,10 @@ func handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "Groq API key is required for test mode")
 		return
 	}
+	if s.Mode == "openai" && s.OpenAIAPIKey == "" {
+		writeErr(w, http.StatusBadRequest, "OpenAI API key is required for openai mode")
+		return
+	}
 	if s.Mode == "prod" {
 		if s.OpenAIAPIKey == "" {
 			writeErr(w, http.StatusBadRequest, "OpenAI API key is required for prod mode")
@@ -559,4 +616,8 @@ func handleUpdateThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"path": destPath})
+}
+
+func handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"lines": logbuf.Default.Lines()})
 }

@@ -81,6 +81,38 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 			FFmpegBin: ffmpegBin,
 		})
 
+	case "openai":
+		log.Println("worker-manager: starting in openai mode (OpenAI + Edge TTS)")
+
+		baseURL := settings.OpenAIBaseURL
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
+		model := settings.OpenAIModel
+		if model == "" {
+			model = "gpt-4o"
+		}
+		llmClient = llm.NewClient(llm.Config{
+			BaseURL: baseURL,
+			APIKey:  settings.OpenAIAPIKey,
+			Model:   model,
+		})
+
+		voice := settings.EdgeVoice
+		if voice == "" {
+			voice = "en-US-AndrewNeural"
+		}
+		rate := settings.EdgeRate
+		if rate == "" {
+			rate = "-20%"
+		}
+		ttsProvider = tts.NewEdgeClient(tts.EdgeConfig{
+			Voice:     voice,
+			Rate:      rate,
+			FFmpegBin: ffmpegBin,
+			Normalize: settings.Normalize,
+		})
+
 	default: // "test"
 		log.Println("worker-manager: starting in test mode (Groq + Edge TTS)")
 

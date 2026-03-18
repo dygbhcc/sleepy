@@ -51,7 +51,7 @@ jobs:
 
       - name: Build binaries
         run: |
-          go build -o bin/seed ./cmd/seed
+          go build -o bin/seed ./cmd/api
           go build -o bin/worker ./cmd/worker
 
       - name: Run migrations
