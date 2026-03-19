@@ -115,7 +115,7 @@ func (c *Client) ExchangeShortLivedToken(ctx context.Context, appID, appSecret, 
 
 // GetUserID fetches the Instagram user ID for the given access token.
 func (c *Client) GetUserID(ctx context.Context, accessToken string) (string, error) {
-	u := fmt.Sprintf("https://graph.facebook.com/v19.0/me/accounts?access_token=%s", url.QueryEscape(accessToken))
+	u := fmt.Sprintf("https://graph.facebook.com/v19.0/me/accounts?fields=instagram_business_account&access_token=%s", url.QueryEscape(accessToken))
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return "", err
@@ -126,15 +126,21 @@ func (c *Client) GetUserID(ctx context.Context, accessToken string) (string, err
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+	log.Printf("instagram: /me/accounts response: %s", string(body))
+
 	var result struct {
 		Data []struct {
-			ID              string `json:"id"`
+			ID                       string `json:"id"`
 			InstagramBusinessAccount struct {
 				ID string `json:"id"`
 			} `json:"instagram_business_account"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("decode accounts: %w", err)
 	}
 	for _, page := range result.Data {
@@ -142,7 +148,7 @@ func (c *Client) GetUserID(ctx context.Context, accessToken string) (string, err
 			return page.InstagramBusinessAccount.ID, nil
 		}
 	}
-	return "", fmt.Errorf("no Instagram business account found")
+	return "", fmt.Errorf("no Instagram business account found (pages: %d, response: %s)", len(result.Data), string(body))
 }
 
 // AuthURL returns the Facebook OAuth dialog URL for Instagram authorization.
@@ -151,7 +157,7 @@ func AuthURL(appID, redirectURL, state string) string {
 		"https://www.facebook.com/v19.0/dialog/oauth?client_id=%s&redirect_uri=%s&scope=%s&response_type=code&state=%s",
 		url.QueryEscape(appID),
 		url.QueryEscape(redirectURL),
-		url.QueryEscape("instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement"),
+		url.QueryEscape("instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,pages_manage_metadata,business_management"),
 		url.QueryEscape(state),
 	)
 }

@@ -931,6 +931,8 @@ function applyI18n(){
 const API = '';
 let allRuns = [];
 let currentFilter = 'ALL';
+let currentPage = 1;
+const PAGE_SIZE = 20;
 let refreshTimer = null;
 let detailPollTimer = null;
 let detailRunID = null;
@@ -981,7 +983,7 @@ function renderFilters(){
     b.className='filter-btn'+(currentFilter===s?' active':'');
     const count=s==='ALL'?allRuns.length:allRuns.filter(r=>r.Status===s).length;
     b.textContent=s+' ('+count+')';
-    b.onclick=()=>{currentFilter=s;renderFilters();renderTable()};
+    b.onclick=()=>{currentFilter=s;currentPage=1;renderFilters();renderTable()};
     bar.appendChild(b);
   });
 }
@@ -1006,9 +1008,14 @@ function renderTable(){
   const filtered=currentFilter==='ALL'?allRuns:allRuns.filter(r=>r.Status===currentFilter);
   if(!filtered.length){
     body.innerHTML=`<tr class="empty-row"><td colspan="6">${t('noRunsYet')}</td></tr>`;
+    renderPagination(0);
     return;
   }
-  body.innerHTML=filtered.map(r=>`<tr onclick="openDetail('${r.ID}')">
+  const totalPages=Math.ceil(filtered.length/PAGE_SIZE);
+  if(currentPage>totalPages)currentPage=totalPages;
+  const start=(currentPage-1)*PAGE_SIZE;
+  const page=filtered.slice(start,start+PAGE_SIZE);
+  body.innerHTML=page.map(r=>`<tr onclick="openDetail('${r.ID}')">
     <td>${esc(r.Series)}</td>
     <td>${esc(r.Episode)}</td>
     <td>${esc(r.Style)}</td>
@@ -1016,7 +1023,23 @@ function renderTable(){
     <td>${renderPipelineProgress(r)}</td>
     <td>${fmtDate(r.CreatedAt)}</td>
   </tr>`).join('');
+  renderPagination(filtered.length);
 }
+function renderPagination(total){
+  let el=document.getElementById('runsPagination');
+  if(!el){
+    el=document.createElement('div');
+    el.id='runsPagination';
+    el.style.cssText='display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 0;font-size:13px;color:var(--text-secondary)';
+    document.getElementById('runsBody').closest('table').after(el);
+  }
+  const totalPages=Math.ceil(total/PAGE_SIZE);
+  if(totalPages<=1){el.innerHTML='';return;}
+  el.innerHTML=`<button class="btn btn-sm" onclick="goPage(${currentPage-1})" ${currentPage<=1?'disabled':''}>← Prev</button>
+    <span>Page ${currentPage} of ${totalPages}</span>
+    <button class="btn btn-sm" onclick="goPage(${currentPage+1})" ${currentPage>=totalPages?'disabled':''}>Next →</button>`;
+}
+function goPage(p){currentPage=p;renderTable();}
 
 function renderPipelineProgress(run){
   // 7 steps: PENDING→SCRIPTED→VOICED→THUMBNAILED→RENDERED→PACKAGED→UPLOADED→DONE
