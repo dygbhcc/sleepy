@@ -109,6 +109,8 @@ type WorkerSettings struct {
 	InstagramEnabled     bool
 	InstagramAccessToken string
 	InstagramUserID      string
+	InstagramAppID       string
+	InstagramAppSecret   string
 	PexelsAPIKey         string
 
 	UpdatedAt         time.Time

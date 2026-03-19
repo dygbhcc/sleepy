@@ -582,12 +582,12 @@ func (d *DB) GetWorkerSettings(ctx context.Context) (*domain.WorkerSettings, err
 	err := d.pool.QueryRowContext(ctx,
 		`SELECT mode,
 		        worker_mode, require_voice_approval, max_inflight_script, max_inflight_tts, max_inflight_render,
-		        openai_api_key, openai_base_url, openai_model,
+		        gemini_api_key, gemini_base_url, gemini_model,
 		        elevenlabs_api_key, elevenlabs_voice_id, elevenlabs_model_id, elevenlabs_speed,
 		        edge_voice, edge_rate, normalize, music_path,
 		        youtube_enabled, youtube_privacy, youtube_client_id, youtube_client_secret,
 		        youtube_access_token, youtube_refresh_token, youtube_token_expiry,
-		        instagram_enabled, instagram_access_token, instagram_user_id, pexels_api_key,
+		        instagram_enabled, instagram_access_token, instagram_user_id, instagram_app_id, instagram_app_secret, pexels_api_key,
 		        updated_at
 		 FROM worker_settings WHERE id = 1`,
 	).Scan(&s.Mode,
@@ -597,7 +597,7 @@ func (d *DB) GetWorkerSettings(ctx context.Context) (*domain.WorkerSettings, err
 		&s.EdgeVoice, &s.EdgeRate, &s.Normalize, &s.MusicPath,
 		&s.YouTubeEnabled, &s.YouTubePrivacy, &s.YouTubeClientID, &s.YouTubeClientSecret,
 		&s.YouTubeAccessToken, &s.YouTubeRefreshToken, &s.YouTubeTokenExpiry,
-		&s.InstagramEnabled, &s.InstagramAccessToken, &s.InstagramUserID, &s.PexelsAPIKey,
+		&s.InstagramEnabled, &s.InstagramAccessToken, &s.InstagramUserID, &s.InstagramAppID, &s.InstagramAppSecret, &s.PexelsAPIKey,
 		&s.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get worker settings: %w", err)
@@ -611,12 +611,12 @@ func (d *DB) SaveWorkerSettings(ctx context.Context, s *domain.WorkerSettings) e
 		`UPDATE worker_settings SET
 			mode = $1,
 			worker_mode = $2, require_voice_approval = $3, max_inflight_script = $4, max_inflight_tts = $5, max_inflight_render = $6,
-			openai_api_key = $7, openai_base_url = $8, openai_model = $9,
+			gemini_api_key = $7, gemini_base_url = $8, gemini_model = $9,
 			elevenlabs_api_key = $10, elevenlabs_voice_id = $11, elevenlabs_model_id = $12, elevenlabs_speed = $13,
 			edge_voice = $14, edge_rate = $15, normalize = $16, music_path = $17,
 			youtube_enabled = $18, youtube_privacy = $19, youtube_client_id = $20, youtube_client_secret = $21,
 			youtube_access_token = $22, youtube_refresh_token = $23, youtube_token_expiry = $24,
-			instagram_enabled = $25, instagram_access_token = $26, instagram_user_id = $27, pexels_api_key = $28,
+			instagram_enabled = $25, instagram_access_token = $26, instagram_user_id = $27, instagram_app_id = $28, instagram_app_secret = $29, pexels_api_key = $30,
 			updated_at = now()
 		 WHERE id = 1`,
 		s.Mode,
@@ -626,7 +626,7 @@ func (d *DB) SaveWorkerSettings(ctx context.Context, s *domain.WorkerSettings) e
 		s.EdgeVoice, s.EdgeRate, s.Normalize, s.MusicPath,
 		s.YouTubeEnabled, s.YouTubePrivacy, s.YouTubeClientID, s.YouTubeClientSecret,
 		s.YouTubeAccessToken, s.YouTubeRefreshToken, s.YouTubeTokenExpiry,
-		s.InstagramEnabled, s.InstagramAccessToken, s.InstagramUserID, s.PexelsAPIKey,
+		s.InstagramEnabled, s.InstagramAccessToken, s.InstagramUserID, s.InstagramAppID, s.InstagramAppSecret, s.PexelsAPIKey,
 	)
 	if err != nil {
 		return fmt.Errorf("save worker settings: %w", err)

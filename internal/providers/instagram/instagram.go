@@ -145,6 +145,52 @@ func (c *Client) GetUserID(ctx context.Context, accessToken string) (string, err
 	return "", fmt.Errorf("no Instagram business account found")
 }
 
+// AuthURL returns the Facebook OAuth dialog URL for Instagram authorization.
+func AuthURL(appID, redirectURL, state string) string {
+	return fmt.Sprintf(
+		"https://www.facebook.com/v19.0/dialog/oauth?client_id=%s&redirect_uri=%s&scope=%s&response_type=code&state=%s",
+		url.QueryEscape(appID),
+		url.QueryEscape(redirectURL),
+		url.QueryEscape("instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement"),
+		url.QueryEscape(state),
+	)
+}
+
+// ExchangeCode exchanges an authorization code for a short-lived access token.
+func (c *Client) ExchangeCode(ctx context.Context, appID, appSecret, redirectURL, code string) (string, error) {
+	u := fmt.Sprintf(
+		"https://graph.facebook.com/v19.0/oauth/access_token?client_id=%s&client_secret=%s&redirect_uri=%s&code=%s",
+		url.QueryEscape(appID), url.QueryEscape(appSecret), url.QueryEscape(redirectURL), url.QueryEscape(code),
+	)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("exchange code: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		AccessToken string `json:"access_token"`
+		Error       *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode token response: %w", err)
+	}
+	if result.Error != nil {
+		return "", fmt.Errorf("facebook API: %s", result.Error.Message)
+	}
+	if result.AccessToken == "" {
+		return "", fmt.Errorf("empty access token in response")
+	}
+	return result.AccessToken, nil
+}
+
 // --- Internal API calls ---
 
 func (c *Client) createContainer(ctx context.Context, userID, token string, req PublishRequest) (string, error) {

@@ -95,6 +95,8 @@ func main() {
 	mux.HandleFunc("GET /api/instagram/status", handleInstagramStatus)
 	mux.HandleFunc("POST /api/instagram/connect", handleInstagramConnect)
 	mux.HandleFunc("POST /api/instagram/disconnect", handleInstagramDisconnect)
+	mux.HandleFunc("GET /api/instagram/auth", handleInstagramAuth)
+	mux.HandleFunc("GET /api/instagram/callback", handleInstagramCallback)
 	mux.HandleFunc("POST /api/runs/{id}/upload-instagram", handleUploadInstagram)
 
 	mux.HandleFunc("GET /assets/{runID}/{file}", handleServeAsset)
@@ -683,6 +685,8 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"youtube_connected":       s.YouTubeRefreshToken != "",
 		"instagram_enabled":       s.InstagramEnabled,
 		"instagram_connected":     s.InstagramAccessToken != "" && s.InstagramUserID != "",
+		"instagram_app_id":        s.InstagramAppID,
+		"instagram_app_secret":    maskKey(s.InstagramAppSecret),
 		"pexels_api_key":          maskKey(s.PexelsAPIKey),
 		"updated_at":              s.UpdatedAt,
 	})
@@ -707,6 +711,8 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		YouTubeClientID      *string  `json:"youtube_client_id"`
 		YouTubeClientSecret  *string  `json:"youtube_client_secret"`
 		InstagramEnabled     *bool    `json:"instagram_enabled"`
+		InstagramAppID       *string  `json:"instagram_app_id"`
+		InstagramAppSecret   *string  `json:"instagram_app_secret"`
 		PexelsAPIKey         *string  `json:"pexels_api_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -771,6 +777,12 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.InstagramEnabled != nil {
 		s.InstagramEnabled = *req.InstagramEnabled
+	}
+	if req.InstagramAppID != nil {
+		s.InstagramAppID = *req.InstagramAppID
+	}
+	if req.InstagramAppSecret != nil && *req.InstagramAppSecret != "" && !strings.HasPrefix(*req.InstagramAppSecret, "***") {
+		s.InstagramAppSecret = *req.InstagramAppSecret
 	}
 	if req.PexelsAPIKey != nil && *req.PexelsAPIKey != "" && !strings.HasPrefix(*req.PexelsAPIKey, "***") {
 		s.PexelsAPIKey = *req.PexelsAPIKey
@@ -1200,6 +1212,67 @@ func handleInstagramConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "connected", "user_id": req.UserID})
+}
+
+func handleInstagramAuth(w http.ResponseWriter, r *http.Request) {
+	s, err := store.GetWorkerSettings(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if s.InstagramAppID == "" || s.InstagramAppSecret == "" {
+		writeErr(w, http.StatusBadRequest, "Instagram App ID and App Secret not configured")
+		return
+	}
+	redirectURL := baseURL() + "/api/instagram/callback"
+	url := instagram.AuthURL(s.InstagramAppID, redirectURL, "sleepy-instagram")
+	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+}
+
+func handleInstagramCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		writeErr(w, http.StatusBadRequest, "missing code parameter")
+		return
+	}
+
+	s, err := store.GetWorkerSettings(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ig := instagram.NewClient(store)
+	redirectURL := baseURL() + "/api/instagram/callback"
+
+	// Exchange code for short-lived token.
+	shortToken, err := ig.ExchangeCode(r.Context(), s.InstagramAppID, s.InstagramAppSecret, redirectURL, code)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "exchange code: "+err.Error())
+		return
+	}
+
+	// Exchange short-lived token for long-lived token (60 days).
+	longToken, err := ig.ExchangeShortLivedToken(r.Context(), s.InstagramAppID, s.InstagramAppSecret, shortToken)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "exchange token: "+err.Error())
+		return
+	}
+
+	// Get Instagram Business Account ID.
+	userID, err := ig.GetUserID(r.Context(), longToken)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "get user ID: "+err.Error())
+		return
+	}
+
+	// Save to DB.
+	if err := store.SaveInstagramToken(r.Context(), longToken, userID); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 }
 
 func handleInstagramDisconnect(w http.ResponseWriter, r *http.Request) {
