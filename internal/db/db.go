@@ -47,7 +47,9 @@ func (d *DB) Close() error { return d.pool.Close() }
 const runColumns = `id, series, episode, style, language, duration_min, status, error_text, created_at, updated_at,
 	script_attempt, voice_attempt, render_attempt, package_attempt, youtube_attempt, last_error, needs_review,
 	script_hash, voice_hash, render_hash, locked_by, locked_at,
-	voice_approved, title, title_locked, youtube_video_id, active_fix_plan_id, active_fix_start_attempt, policy_overrides_json`
+	voice_approved, title, title_locked, youtube_video_id,
+	content_type, duration_sec, instagram_media_id,
+	active_fix_plan_id, active_fix_start_attempt, policy_overrides_json`
 
 func scanRun(row interface{ Scan(...any) error }, r *domain.Run) error {
 	return row.Scan(&r.ID, &r.Series, &r.Episode, &r.Style, &r.Language, &r.DurationMin,
@@ -55,7 +57,9 @@ func scanRun(row interface{ Scan(...any) error }, r *domain.Run) error {
 		&r.ScriptAttempt, &r.VoiceAttempt, &r.RenderAttempt, &r.PackageAttempt, &r.YouTubeAttempt,
 		&r.LastError, &r.NeedsReview, &r.ScriptHash, &r.VoiceHash, &r.RenderHash,
 		&r.LockedBy, &r.LockedAt,
-		&r.VoiceApproved, &r.Title, &r.TitleLocked, &r.YouTubeVideoID, &r.ActiveFixPlanID, &r.ActiveFixStartAttempt, &r.PolicyOverridesJSON)
+		&r.VoiceApproved, &r.Title, &r.TitleLocked, &r.YouTubeVideoID,
+		&r.ContentType, &r.DurationSec, &r.InstagramMediaID,
+		&r.ActiveFixPlanID, &r.ActiveFixStartAttempt, &r.PolicyOverridesJSON)
 }
 
 // GetRun loads a run by ID.
@@ -583,6 +587,7 @@ func (d *DB) GetWorkerSettings(ctx context.Context) (*domain.WorkerSettings, err
 		        edge_voice, edge_rate, normalize, music_path,
 		        youtube_enabled, youtube_privacy, youtube_client_id, youtube_client_secret,
 		        youtube_access_token, youtube_refresh_token, youtube_token_expiry,
+		        instagram_enabled, instagram_access_token, instagram_user_id, pexels_api_key,
 		        updated_at
 		 FROM worker_settings WHERE id = 1`,
 	).Scan(&s.Mode,
@@ -592,6 +597,7 @@ func (d *DB) GetWorkerSettings(ctx context.Context) (*domain.WorkerSettings, err
 		&s.EdgeVoice, &s.EdgeRate, &s.Normalize, &s.MusicPath,
 		&s.YouTubeEnabled, &s.YouTubePrivacy, &s.YouTubeClientID, &s.YouTubeClientSecret,
 		&s.YouTubeAccessToken, &s.YouTubeRefreshToken, &s.YouTubeTokenExpiry,
+		&s.InstagramEnabled, &s.InstagramAccessToken, &s.InstagramUserID, &s.PexelsAPIKey,
 		&s.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get worker settings: %w", err)
@@ -610,6 +616,7 @@ func (d *DB) SaveWorkerSettings(ctx context.Context, s *domain.WorkerSettings) e
 			edge_voice = $14, edge_rate = $15, normalize = $16, music_path = $17,
 			youtube_enabled = $18, youtube_privacy = $19, youtube_client_id = $20, youtube_client_secret = $21,
 			youtube_access_token = $22, youtube_refresh_token = $23, youtube_token_expiry = $24,
+			instagram_enabled = $25, instagram_access_token = $26, instagram_user_id = $27, pexels_api_key = $28,
 			updated_at = now()
 		 WHERE id = 1`,
 		s.Mode,
@@ -619,6 +626,7 @@ func (d *DB) SaveWorkerSettings(ctx context.Context, s *domain.WorkerSettings) e
 		s.EdgeVoice, s.EdgeRate, s.Normalize, s.MusicPath,
 		s.YouTubeEnabled, s.YouTubePrivacy, s.YouTubeClientID, s.YouTubeClientSecret,
 		s.YouTubeAccessToken, s.YouTubeRefreshToken, s.YouTubeTokenExpiry,
+		s.InstagramEnabled, s.InstagramAccessToken, s.InstagramUserID, s.PexelsAPIKey,
 	)
 	if err != nil {
 		return fmt.Errorf("save worker settings: %w", err)
@@ -695,6 +703,53 @@ func (d *DB) CleanStaleLocks(ctx context.Context) (int64, error) {
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
+}
+
+// GetWorkerSettingsInstagram returns the Instagram access token and user ID.
+func (d *DB) GetWorkerSettingsInstagram(ctx context.Context) (string, string, error) {
+	var token, userID string
+	err := d.pool.QueryRowContext(ctx,
+		`SELECT instagram_access_token, instagram_user_id FROM worker_settings WHERE id = 1`,
+	).Scan(&token, &userID)
+	if err != nil {
+		return "", "", fmt.Errorf("get instagram settings: %w", err)
+	}
+	return token, userID, nil
+}
+
+// SaveInstagramToken persists an Instagram access token and user ID.
+func (d *DB) SaveInstagramToken(ctx context.Context, accessToken, userID string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE worker_settings SET instagram_access_token = $1, instagram_user_id = $2, instagram_enabled = true, updated_at = now() WHERE id = 1`,
+		accessToken, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("save instagram token: %w", err)
+	}
+	return nil
+}
+
+// ClearInstagramToken removes the stored Instagram token.
+func (d *DB) ClearInstagramToken(ctx context.Context) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE worker_settings SET instagram_access_token = '', instagram_user_id = '', instagram_enabled = false, updated_at = now() WHERE id = 1`,
+	)
+	if err != nil {
+		return fmt.Errorf("clear instagram token: %w", err)
+	}
+	return nil
+}
+
+// SetInstagramMediaID records the Instagram media ID for a run.
+func (d *DB) SetInstagramMediaID(ctx context.Context, runID, mediaID string) error {
+	_, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET instagram_media_id = $1, updated_at = now() WHERE id = $2`,
+		mediaID, runID,
+	)
+	if err != nil {
+		return fmt.Errorf("set instagram media id: %w", err)
+	}
+	return nil
 }
 
 // DeleteRun deletes a run and all associated assets and jobs (via CASCADE).

@@ -241,6 +241,45 @@ tr:hover{background:var(--surface2);cursor:pointer}
     </div>
   </div>
 
+  <!-- Reels Creator -->
+  <div class="card" style="margin-bottom:24px">
+    <h2>Instagram Reels</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:end">
+      <div>
+        <div class="form-group">
+          <label>Category</label>
+          <select id="reelsCategory" onchange="filterReelsTopics()">
+            <option value="">All Categories</option>
+            <option value="Wellness">Wellness</option>
+            <option value="Productivity">Productivity</option>
+            <option value="Self-Care">Self-Care</option>
+            <option value="Fitness">Fitness</option>
+            <option value="Mindset">Mindset</option>
+            <option value="Home">Home</option>
+            <option value="Finance">Finance</option>
+            <option value="Recipes">Recipes</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Topic</label>
+          <select id="reelsTopic">
+            <option value="">-- Select or use batch --</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <div class="form-group">
+          <label>Duration (seconds)</label>
+          <input type="number" id="reelsDuration" value="60" min="15" max="90">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" style="flex:1" onclick="createReel()">Create Reel</button>
+          <button class="btn" style="flex:1;background:#E1306C;color:#fff" onclick="batchCreateReels()">Batch (3)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Runs Table -->
   <div class="card">
     <h2 data-i18n="allRuns"></h2>
@@ -423,6 +462,28 @@ tr:hover{background:var(--surface2);cursor:pointer}
             <button class="btn btn-sm" id="ytConnectBtn" onclick="connectYouTube()" style="background:var(--accent);color:#fff">Connect YouTube</button>
             <button class="btn btn-sm btn-danger" id="ytDisconnectBtn" onclick="disconnectYouTube()" style="display:none">Disconnect</button>
             <span id="ytStatus" style="font-size:12px;color:var(--text-secondary)"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Instagram -->
+      <div class="settings-section" style="margin-top:16px">
+        <h3 style="margin:0 0 12px;font-size:14px;color:var(--text-secondary)">Instagram Reels</h3>
+        <div class="settings-grid">
+          <div class="form-group settings-full" style="display:flex;align-items:center;gap:8px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin:0">
+              <input type="checkbox" id="sInstagramEnabled">
+              <span>Enable Instagram publishing</span>
+            </label>
+          </div>
+          <div class="form-group settings-full">
+            <label>Pexels API Key <span style="color:var(--text2);font-weight:400;font-size:11px">(for B-roll video clips)</span></label>
+            <input type="password" id="sPexelsKey" placeholder="(get from pexels.com/api)">
+          </div>
+          <div class="form-group settings-full" style="display:flex;align-items:end;gap:8px">
+            <span id="igStatus" style="font-size:12px;color:var(--text2)"></span>
+            <button class="btn btn-sm" id="igConnectBtn" onclick="connectInstagram()" style="background:#E1306C;color:#fff">Connect Instagram</button>
+            <button class="btn btn-sm btn-danger" id="igDisconnectBtn" onclick="disconnectInstagram()" style="display:none">Disconnect</button>
           </div>
         </div>
       </div>
@@ -1192,6 +1253,27 @@ function renderDetail(data){
     }
   }
 
+  // Instagram section
+  let instagramHTML='';
+  const reelsAsset=assets.find(a=>a.Kind==='reels_mp4');
+  if(reelsAsset||run.ContentType==='lifestyle_reel'){
+    const vidAssetForIG=reelsAsset||videoAsset;
+    if(vidAssetForIG){
+      if(run.InstagramMediaID){
+        instagramHTML=`<div class="section"><h3>Instagram</h3><span class="badge badge-done">Published</span> <span style="font-size:12px;color:var(--text2)">Media ID: ${run.InstagramMediaID}</span></div>`;
+      }else{
+        instagramHTML=`<div class="section"><h3>Instagram</h3><button class="btn btn-sm" style="background:#E1306C;color:#fff" onclick="uploadToInstagram('${run.ID}')">Publish to Instagram</button></div>`;
+      }
+    }
+  }
+
+  // Reels video player
+  let reelsVideoHTML='';
+  if(reelsAsset){
+    const fname=reelsAsset.Path.split('/').pop();
+    reelsVideoHTML=`<div class="section"><h3>Reel Preview</h3><video style="max-width:270px;border-radius:8px" controls><source src="${API}/assets/${run.ID}/${fname}" type="video/mp4">Video not supported</video></div>`;
+  }
+
   // Script section
   const scriptAsset=assets.find(a=>a.Kind==='script_md');
   const canEditScript=scriptAsset||(run.Status==='NEEDS_REVIEW'||run.Status==='FAILED');
@@ -1227,7 +1309,7 @@ function renderDetail(data){
     autopilotHTML+='</div>';
   }
 
-  document.getElementById('modalBody').innerHTML=progressHTML+approvalHTML+errorHTML+detailHTML+autopilotHTML+assetsHTML+thumbHTML+videoHTML+youtubeHTML+scriptHTML;
+  document.getElementById('modalBody').innerHTML=progressHTML+approvalHTML+errorHTML+detailHTML+autopilotHTML+assetsHTML+thumbHTML+videoHTML+reelsVideoHTML+youtubeHTML+instagramHTML+scriptHTML;
 
   // Footer buttons
   let footerHTML='';
@@ -1512,6 +1594,10 @@ async function loadSettings(){
     document.getElementById('sYTClientSecret').value=s.youtube_client_secret||'';
     if(s.youtube_privacy)document.getElementById('sYTPrivacy').value=s.youtube_privacy;
     updateYouTubeStatus(s.youtube_connected);
+    // Instagram
+    document.getElementById('sInstagramEnabled').checked=!!s.instagram_enabled;
+    document.getElementById('sPexelsKey').value=s.pexels_api_key||'';
+    updateInstagramStatus(s.instagram_connected);
   }catch(e){console.error('load settings:',e)}
 }
 
@@ -1532,7 +1618,9 @@ async function saveSettings(){
     youtube_enabled:document.getElementById('sYouTubeEnabled').checked,
     youtube_privacy:document.getElementById('sYTPrivacy').value,
     youtube_client_id:document.getElementById('sYTClientID').value,
-    youtube_client_secret:document.getElementById('sYTClientSecret').value
+    youtube_client_secret:document.getElementById('sYTClientSecret').value,
+    instagram_enabled:document.getElementById('sInstagramEnabled').checked,
+    pexels_api_key:document.getElementById('sPexelsKey').value
   };
   try{
     const res=await fetch(API+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -1671,11 +1759,114 @@ async function pollLogs(){
   }catch(e){}
 }
 
+// ==================== Reels ====================
+let reelsTopics=[];
+async function loadReelsTopics(){
+  try{
+    const res=await fetch(API+'/api/reels/topics');
+    if(!res.ok)return;
+    reelsTopics=await res.json();
+    filterReelsTopics();
+  }catch(e){console.error('load reels topics:',e)}
+}
+function filterReelsTopics(){
+  const cat=document.getElementById('reelsCategory').value;
+  const sel=document.getElementById('reelsTopic');
+  sel.innerHTML='<option value="">-- Select or use batch --</option>';
+  const filtered=cat?reelsTopics.filter(t=>t.Category===cat):reelsTopics;
+  filtered.forEach(t=>{
+    const opt=document.createElement('option');
+    opt.value=t.Topic;
+    opt.textContent=t.Category+': '+t.Topic;
+    sel.appendChild(opt);
+  });
+}
+async function createReel(){
+  const topic=document.getElementById('reelsTopic').value;
+  if(!topic){toast('Please select a topic','error');return}
+  const dur=parseInt(document.getElementById('reelsDuration').value)||60;
+  const cat=reelsTopics.find(t=>t.Topic===topic);
+  try{
+    const res=await fetch(API+'/api/reels',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({topic:topic,category:cat?cat.Category:'',duration_sec:dur})});
+    if(!res.ok)throw new Error((await res.json()).error);
+    toast('Reel created!');
+    fetchRuns();
+  }catch(e){toast('Error: '+e.message,'error')}
+}
+async function batchCreateReels(){
+  const dur=parseInt(document.getElementById('reelsDuration').value)||60;
+  const cat=document.getElementById('reelsCategory').value;
+  try{
+    const res=await fetch(API+'/api/reels/batch',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({count:3,category:cat,duration_sec:dur})});
+    if(!res.ok)throw new Error((await res.json()).error);
+    const runs=await res.json();
+    toast(runs.length+' Reels created!');
+    fetchRuns();
+  }catch(e){toast('Error: '+e.message,'error')}
+}
+
+// ==================== Instagram ====================
+function updateInstagramStatus(connected){
+  const st=document.getElementById('igStatus');
+  const connBtn=document.getElementById('igConnectBtn');
+  const discBtn=document.getElementById('igDisconnectBtn');
+  if(connected){
+    st.textContent='Connected';st.style.color='var(--green)';
+    connBtn.style.display='none';discBtn.style.display='';
+  }else{
+    st.textContent='Not connected';st.style.color='var(--text2)';
+    connBtn.style.display='';discBtn.style.display='none';
+  }
+}
+async function connectInstagram(){
+  const token=prompt('Paste your Instagram long-lived access token:');
+  if(!token)return;
+  try{
+    const res=await fetch(API+'/api/instagram/connect',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({access_token:token})});
+    if(!res.ok)throw new Error((await res.json()).error);
+    toast('Instagram connected!');
+    updateInstagramStatus(true);
+  }catch(e){toast('Error: '+e.message,'error')}
+}
+async function disconnectInstagram(){
+  try{
+    await fetch(API+'/api/instagram/disconnect',{method:'POST'});
+    updateInstagramStatus(false);
+    toast('Instagram disconnected');
+  }catch(e){toast('Error: '+e.message,'error')}
+}
+async function uploadToInstagram(runId){
+  const btn=event.target;btn.disabled=true;btn.textContent='Publishing...';
+  try{
+    const res=await fetch(API+'/api/runs/'+runId+'/upload-instagram',{method:'POST'});
+    const data=await res.json();
+    if(!res.ok)throw new Error(data.error);
+    toast('Published to Instagram!');
+    btn.textContent='Published';
+    openDetail(runId);
+  }catch(e){
+    toast('Publish failed: '+e.message,'error');
+    btn.disabled=false;btn.textContent='Publish to Instagram';
+  }
+}
+async function checkInstagramStatus(){
+  try{
+    const res=await fetch(API+'/api/instagram/status');
+    const data=await res.json();
+    updateInstagramStatus(data.connected);
+  }catch(e){}
+}
+
 // ==================== Init ====================
 document.getElementById('langSelect').value=currentLang;
 setLang(currentLang);
 fetchRuns();
 refreshTimer=setInterval(fetchRuns,10000);
+loadReelsTopics();
+checkInstagramStatus();
 pollWorkerStatus();
 setInterval(pollWorkerStatus,5000);
 pollLogs();

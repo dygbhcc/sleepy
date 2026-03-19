@@ -45,6 +45,13 @@ func DecideFix(failType FailType, attemptNum int, current TTSSettings) FixAction
 				NewSettings: current,
 				Reason:      "clipping: applying loudnorm limiter",
 			}
+		case 3:
+			return FixAction{
+				Action:      "retry_smaller",
+				PostProcess: "loudnorm",
+				NewSettings: current,
+				Reason:      "clipping: halving chunk + loudnorm",
+			}
 		default:
 			return giveUp(failType)
 		}
@@ -63,7 +70,7 @@ func DecideFix(failType FailType, attemptNum int, current TTSSettings) FixAction
 				NewSettings: TTSSettings{}, // defaults + smaller chunk
 				Reason:      "robotic artifact: halving chunk + defaults",
 			}
-		default:
+		case 3:
 			s := current
 			s.ModelID = switchModel(s.ModelID)
 			return FixAction{
@@ -71,6 +78,16 @@ func DecideFix(failType FailType, attemptNum int, current TTSSettings) FixAction
 				NewSettings: s,
 				Reason:      "robotic artifact: switching model",
 			}
+		case 4:
+			s := current
+			s.ModelID = switchModel(switchModel(s.ModelID))
+			return FixAction{
+				Action:      "retry_smaller",
+				NewSettings: s,
+				Reason:      "robotic artifact: switching model again + smaller chunk",
+			}
+		default:
+			return giveUp(failType)
 		}
 
 	case FailWeirdTimbreShift:
@@ -111,6 +128,14 @@ func DecideFix(failType FailType, attemptNum int, current TTSSettings) FixAction
 				Action:      "retry",
 				NewSettings: current,
 				Reason:      "silence anomaly: retrying same settings",
+			}
+		case 3:
+			s := current
+			s.ModelID = switchModel(s.ModelID)
+			return FixAction{
+				Action:      "retry",
+				NewSettings: s,
+				Reason:      "silence anomaly: switching model",
 			}
 		default:
 			return giveUp(failType)

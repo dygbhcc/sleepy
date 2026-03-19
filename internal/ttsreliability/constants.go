@@ -8,8 +8,8 @@ const (
 
 // Retry / budget limits.
 const (
-	MaxAttemptsPerChunk = 3
-	BudgetMultiplier    = 2 // max total attempts = chunk_count * BudgetMultiplier
+	MaxAttemptsPerChunk = 5
+	BudgetMultiplier    = 3 // max total attempts = chunk_count * BudgetMultiplier
 )
 
 // QA thresholds.
@@ -20,7 +20,7 @@ const (
 	MinRMSThresholdDB     = -40.0 // RMS below → too quiet
 	MaxLUFSDelta          = 1.5   // max LUFS difference between chunks
 	MaxSpectralDelta      = 2.0   // max spectral proxy delta between chunks
-	MinSpectralProxy      = 8.0   // below → robotic/muffled
+	MinSpectralProxy      = 6.0   // below → robotic/muffled (relaxed for calm narration voices)
 	TargetLUFS            = -16.0 // EBU R128 target
 )
 

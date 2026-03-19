@@ -41,6 +41,11 @@ type Run struct {
 	// YouTube upload
 	YouTubeVideoID string
 
+	// Instagram upload
+	ContentType      string // "sleep_narration" or "lifestyle_reel"
+	DurationSec      int    // precise duration in seconds (for Reels)
+	InstagramMediaID string
+
 	// Fix engine fields
 	ActiveFixPlanID      string
 	ActiveFixStartAttempt int
@@ -100,6 +105,12 @@ type WorkerSettings struct {
 	YouTubeRefreshToken string
 	YouTubeTokenExpiry  time.Time
 
+	// Instagram
+	InstagramEnabled     bool
+	InstagramAccessToken string
+	InstagramUserID      string
+	PexelsAPIKey         string
+
 	UpdatedAt         time.Time
 }
 
@@ -113,4 +124,15 @@ const (
 	AssetMetadataJSON = "metadata_json"
 	AssetEpisodePack  = "episode_pack_zip"
 	AssetQAReport     = "qa_report"
+
+	// Reels-specific
+	AssetReelsMP4    = "reels_mp4"
+	AssetCaptionsSRT = "captions_srt"
+	AssetBRollJSON   = "broll_json"
+)
+
+// Content type constants.
+const (
+	ContentSleepNarration = "sleep_narration"
+	ContentLifestyleReel  = "lifestyle_reel"
 )

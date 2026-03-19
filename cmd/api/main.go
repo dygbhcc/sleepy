@@ -19,6 +19,7 @@ import (
 	"sleepy/internal/domain"
 	"sleepy/internal/jobs"
 	"sleepy/internal/logbuf"
+	"sleepy/internal/providers/instagram"
 	"sleepy/internal/providers/youtube"
 	"sleepy/internal/worker"
 )
@@ -85,6 +86,17 @@ func main() {
 	mux.HandleFunc("GET /api/youtube/status", handleYouTubeStatus)
 	mux.HandleFunc("POST /api/youtube/disconnect", handleYouTubeDisconnect)
 	mux.HandleFunc("POST /api/runs/{id}/upload-youtube", handleUploadYouTube)
+	// Reels
+	mux.HandleFunc("GET /api/reels/topics", handleReelsTopics)
+	mux.HandleFunc("POST /api/reels", handleCreateReel)
+	mux.HandleFunc("POST /api/reels/batch", handleBatchCreateReels)
+
+	// Instagram
+	mux.HandleFunc("GET /api/instagram/status", handleInstagramStatus)
+	mux.HandleFunc("POST /api/instagram/connect", handleInstagramConnect)
+	mux.HandleFunc("POST /api/instagram/disconnect", handleInstagramDisconnect)
+	mux.HandleFunc("POST /api/runs/{id}/upload-instagram", handleUploadInstagram)
+
 	mux.HandleFunc("GET /assets/{runID}/{file}", handleServeAsset)
 
 	addr := os.Getenv("ADDR")
@@ -669,6 +681,9 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"youtube_client_id":       s.YouTubeClientID,
 		"youtube_client_secret":   maskKey(s.YouTubeClientSecret),
 		"youtube_connected":       s.YouTubeRefreshToken != "",
+		"instagram_enabled":       s.InstagramEnabled,
+		"instagram_connected":     s.InstagramAccessToken != "" && s.InstagramUserID != "",
+		"pexels_api_key":          maskKey(s.PexelsAPIKey),
 		"updated_at":              s.UpdatedAt,
 	})
 }
@@ -691,6 +706,8 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		YouTubePrivacy       *string  `json:"youtube_privacy"`
 		YouTubeClientID      *string  `json:"youtube_client_id"`
 		YouTubeClientSecret  *string  `json:"youtube_client_secret"`
+		InstagramEnabled     *bool    `json:"instagram_enabled"`
+		PexelsAPIKey         *string  `json:"pexels_api_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
@@ -751,6 +768,12 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.YouTubeClientSecret != nil && *req.YouTubeClientSecret != "" && !strings.HasPrefix(*req.YouTubeClientSecret, "***") {
 		s.YouTubeClientSecret = *req.YouTubeClientSecret
+	}
+	if req.InstagramEnabled != nil {
+		s.InstagramEnabled = *req.InstagramEnabled
+	}
+	if req.PexelsAPIKey != nil && *req.PexelsAPIKey != "" && !strings.HasPrefix(*req.PexelsAPIKey, "***") {
+		s.PexelsAPIKey = *req.PexelsAPIKey
 	}
 
 	// Prevent settings changes while worker is running to avoid stale config.
@@ -1020,4 +1043,227 @@ func handleUploadYouTube(w http.ResponseWriter, r *http.Request) {
 
 func handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"lines": logbuf.Default.Lines()})
+}
+
+// ---------- Reels ----------
+
+func handleReelsTopics(w http.ResponseWriter, _ *http.Request) {
+	json.NewEncoder(w).Encode(lifestyleTopicPool)
+}
+
+func handleCreateReel(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Topic       string `json:"topic"`
+		Category    string `json:"category"`
+		Language    string `json:"language"`
+		DurationSec int    `json:"duration_sec"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Topic == "" {
+		writeErr(w, http.StatusBadRequest, "topic is required")
+		return
+	}
+	if req.Category == "" {
+		req.Category = "Lifestyle"
+	}
+	if req.Language == "" {
+		req.Language = "en"
+	}
+	if req.DurationSec <= 0 {
+		req.DurationSec = 60
+	}
+
+	run, err := store.CreateRun(r.Context(), req.Category, req.Topic, req.Category, req.Language, 1)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Set content type and duration.
+	_, err = store.Pool().ExecContext(r.Context(),
+		`UPDATE runs SET content_type = $1, duration_sec = $2, updated_at = now() WHERE id = $3`,
+		domain.ContentLifestyleReel, req.DurationSec, run.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	run.ContentType = domain.ContentLifestyleReel
+	run.DurationSec = req.DurationSec
+
+	if err := store.EnqueueJob(r.Context(), run.ID, jobs.JobTypeRunPipeline); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, run)
+}
+
+func handleBatchCreateReels(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Count       int    `json:"count"`
+		Language    string `json:"language"`
+		DurationSec int    `json:"duration_sec"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Count <= 0 {
+		req.Count = 3
+	}
+	if req.Count > 10 {
+		req.Count = 10
+	}
+	if req.Language == "" {
+		req.Language = "en"
+	}
+	if req.DurationSec <= 0 {
+		req.DurationSec = 60
+	}
+
+	existing, err := store.ListRuns(r.Context(), "")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	used := make(map[string]bool, len(existing))
+	for _, run := range existing {
+		used[run.Episode] = true
+	}
+
+	picks := pickLifestyleTopics(req.Count, used)
+	if len(picks) == 0 {
+		writeErr(w, http.StatusConflict, "no unused lifestyle topics available")
+		return
+	}
+
+	var created []domain.Run
+	for _, topic := range picks {
+		run, err := store.CreateRun(r.Context(), topic.Category, topic.Topic, topic.Category, req.Language, 1)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		store.Pool().ExecContext(r.Context(),
+			`UPDATE runs SET content_type = $1, duration_sec = $2, updated_at = now() WHERE id = $3`,
+			domain.ContentLifestyleReel, req.DurationSec, run.ID)
+		run.ContentType = domain.ContentLifestyleReel
+		run.DurationSec = req.DurationSec
+
+		if err := store.EnqueueJob(r.Context(), run.ID, jobs.JobTypeRunPipeline); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		created = append(created, *run)
+	}
+
+	writeJSON(w, http.StatusCreated, created)
+}
+
+// ---------- Instagram ----------
+
+func handleInstagramStatus(w http.ResponseWriter, r *http.Request) {
+	ig := instagram.NewClient(store)
+	writeJSON(w, http.StatusOK, map[string]bool{"connected": ig.HasToken(r.Context())})
+}
+
+func handleInstagramConnect(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AccessToken string `json:"access_token"`
+		UserID      string `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.AccessToken == "" {
+		writeErr(w, http.StatusBadRequest, "access_token is required")
+		return
+	}
+
+	// If user didn't provide user ID, try to fetch it.
+	if req.UserID == "" {
+		ig := instagram.NewClient(store)
+		uid, err := ig.GetUserID(r.Context(), req.AccessToken)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "could not determine Instagram user ID: "+err.Error())
+			return
+		}
+		req.UserID = uid
+	}
+
+	if err := store.SaveInstagramToken(r.Context(), req.AccessToken, req.UserID); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "connected", "user_id": req.UserID})
+}
+
+func handleInstagramDisconnect(w http.ResponseWriter, r *http.Request) {
+	if err := store.ClearInstagramToken(r.Context()); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+}
+
+func handleUploadInstagram(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run, err := store.GetRun(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	// Find the Reels video asset (or fall back to regular video).
+	videoAsset, err := store.GetAsset(r.Context(), id, domain.AssetReelsMP4)
+	if err != nil {
+		videoAsset, err = store.GetAsset(r.Context(), id, domain.AssetVideoMP4)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "no video asset found")
+			return
+		}
+	}
+
+	// Load caption from metadata.
+	caption := fmt.Sprintf("%s | %s", run.Episode, run.Style)
+	metaAsset, err := store.GetAsset(r.Context(), id, domain.AssetMetadataJSON)
+	if err == nil {
+		data, _ := os.ReadFile(metaAsset.Path)
+		var meta map[string]any
+		if json.Unmarshal(data, &meta) == nil {
+			if c, ok := meta["caption"].(string); ok && c != "" {
+				caption = c
+			}
+			if tags, ok := meta["hashtags"].([]any); ok {
+				for _, t := range tags {
+					if s, ok := t.(string); ok {
+						caption += " #" + s
+					}
+				}
+			}
+		}
+	}
+
+	// Instagram requires a public video URL. For now, serve from the local API.
+	videoURL := baseURL() + "/assets/" + run.ID + "/" + filepath.Base(videoAsset.Path)
+
+	ig := instagram.NewClient(store)
+	result, err := ig.Publish(r.Context(), instagram.PublishRequest{
+		VideoURL: videoURL,
+		Caption:  caption,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	_ = store.SetInstagramMediaID(r.Context(), id, result.MediaID)
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"media_id": result.MediaID,
+	})
 }

@@ -12,6 +12,7 @@ import (
 	"sleepy/internal/db"
 	"sleepy/internal/domain"
 	"sleepy/internal/jobs"
+	"sleepy/internal/providers/broll"
 	"sleepy/internal/providers/image"
 	"sleepy/internal/providers/llm"
 	"sleepy/internal/providers/tts"
@@ -178,6 +179,12 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 			deps.YouTubePrivacy = "unlisted"
 		}
 		log.Printf("worker-manager: YouTube upload enabled (privacy=%s)", deps.YouTubePrivacy)
+	}
+
+	// Wire up Pexels B-roll client if configured.
+	if settings.PexelsAPIKey != "" {
+		deps.BRoll = broll.NewPexelsClient(settings.PexelsAPIKey)
+		log.Println("worker-manager: Pexels B-roll enabled")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

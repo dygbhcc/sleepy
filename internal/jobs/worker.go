@@ -8,6 +8,7 @@ import (
 
 	"sleepy/internal/db"
 	"sleepy/internal/domain"
+	"sleepy/internal/providers/broll"
 	"sleepy/internal/providers/image"
 	"sleepy/internal/providers/llm"
 	"sleepy/internal/providers/youtube"
@@ -48,6 +49,7 @@ type Deps struct {
 	InflightLimits InflightLimits // per-stage concurrency caps (0 = unlimited)
 	YouTube        *youtube.Client // nil = YouTube upload disabled
 	YouTubePrivacy string          // "unlisted", "public", "private"
+	BRoll          *broll.PexelsClient // nil = Pexels not configured
 }
 
 // InflightLimits caps how many runs can be actively processed per stage.
@@ -139,7 +141,11 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 
 	switch stage {
 	case domain.StatusPending:
-		stepErr = stepScript(ctx, deps, run, policy)
+		if run.ContentType == domain.ContentLifestyleReel {
+			stepErr = stepReelsScript(ctx, deps, run)
+		} else {
+			stepErr = stepScript(ctx, deps, run, policy)
+		}
 		if !isAuthError(stepErr) {
 			_ = deps.DB.IncrementAttempt(ctx, run.ID, "script_attempt")
 		}
@@ -157,13 +163,21 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 		}
 
 	case domain.StatusVoiced:
-		stepErr = stepThumbnail(ctx, deps, run)
+		if run.ContentType == domain.ContentLifestyleReel {
+			stepErr = stepReelsBRoll(ctx, deps, run)
+		} else {
+			stepErr = stepThumbnail(ctx, deps, run)
+		}
 		if stepErr == nil {
 			report = qaThumbnail(ctx, deps, run)
 		}
 
 	case domain.StatusThumbnailed:
-		stepErr = stepRender(ctx, deps, run, policy)
+		if run.ContentType == domain.ContentLifestyleReel {
+			stepErr = stepReelsRender(ctx, deps, run)
+		} else {
+			stepErr = stepRender(ctx, deps, run, policy)
+		}
 		if !isAuthError(stepErr) {
 			_ = deps.DB.IncrementAttempt(ctx, run.ID, "render_attempt")
 		}

@@ -19,6 +19,7 @@ import (
 type ScriptGenerator interface {
 	GenerateScript(ctx context.Context, req ScriptRequest) (*ScriptResult, error)
 	GenerateTitle(ctx context.Context, req TitleRequest) (string, error)
+	GenerateReelsScript(ctx context.Context, req ReelsScriptRequest) (*ReelsScriptResult, error)
 }
 
 // TitleRequest describes what title to generate.
@@ -711,6 +712,114 @@ func (c *Client) chatCompletion(ctx context.Context, msgs []chatMsg, opts comple
 		return "", fmt.Errorf("empty choices in response")
 	}
 	return cr.Choices[0].Message.Content, nil
+}
+
+// -------- Reels Script Generation --------
+
+// ReelsScriptRequest defines parameters for generating a lifestyle Reels voiceover.
+type ReelsScriptRequest struct {
+	Topic       string // e.g. "Morning Skincare Routine"
+	Category    string // e.g. "Wellness"
+	DurationSec int    // target duration in seconds (default 60)
+	Language    string
+}
+
+// ReelsScriptResult contains the generated Reels content.
+type ReelsScriptResult struct {
+	Voiceover string   // plain text voiceover script
+	Caption   string   // Instagram caption text
+	Hashtags  []string // hashtag list (without #)
+}
+
+// GenerateReelsScript produces a short-form voiceover script for an Instagram Reel.
+func (c *Client) GenerateReelsScript(ctx context.Context, req ReelsScriptRequest) (*ReelsScriptResult, error) {
+	if req.DurationSec <= 0 {
+		req.DurationSec = 60
+	}
+	targetWords := req.DurationSec * 150 / 60 // ~150 words per 60 seconds
+
+	lang := req.Language
+	if lang == "" {
+		lang = "en"
+	}
+
+	systemPrompt := fmt.Sprintf(`You are a viral Instagram Reels content creator specializing in %s lifestyle content.
+You write short, engaging voiceover scripts that hook viewers in the first 3 seconds.
+
+Rules:
+1. Write EXACTLY %d words of voiceover text (for a %d-second Reel).
+2. Start with a powerful hook in the first sentence — a question, bold statement, or surprising fact.
+3. Use short, punchy sentences. 5-15 words each.
+4. End with a clear call-to-action (follow, save, share).
+5. Tone: warm, authentic, conversational — like talking to a friend.
+6. No hashtags in the voiceover text.
+7. Language: %s.
+
+Output format (use these exact markers):
+---VOICEOVER---
+[voiceover text here, plain paragraphs]
+---CAPTION---
+[Instagram caption text, 2-3 short lines, include emojis]
+---HASHTAGS---
+[comma-separated hashtags without #]`, req.Category, targetWords, req.DurationSec, lang)
+
+	userPrompt := fmt.Sprintf("Create an Instagram Reel script about: %s\nCategory: %s", req.Topic, req.Category)
+
+	raw, err := c.chatCompletionWithRetry(ctx, []chatMsg{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}, completionOpts{Temperature: 0.8, MaxTokens: 1000})
+	if err != nil {
+		return nil, fmt.Errorf("generate reels script: %w", err)
+	}
+
+	return parseReelsScript(raw), nil
+}
+
+// parseReelsScript extracts voiceover, caption, and hashtags from the LLM output.
+func parseReelsScript(raw string) *ReelsScriptResult {
+	result := &ReelsScriptResult{}
+
+	// Extract sections using markers.
+	if idx := strings.Index(raw, "---VOICEOVER---"); idx >= 0 {
+		rest := raw[idx+len("---VOICEOVER---"):]
+		if end := strings.Index(rest, "---CAPTION---"); end >= 0 {
+			result.Voiceover = strings.TrimSpace(rest[:end])
+		} else {
+			result.Voiceover = strings.TrimSpace(rest)
+		}
+	}
+
+	if idx := strings.Index(raw, "---CAPTION---"); idx >= 0 {
+		rest := raw[idx+len("---CAPTION---"):]
+		if end := strings.Index(rest, "---HASHTAGS---"); end >= 0 {
+			result.Caption = strings.TrimSpace(rest[:end])
+		} else {
+			result.Caption = strings.TrimSpace(rest)
+		}
+	}
+
+	if idx := strings.Index(raw, "---HASHTAGS---"); idx >= 0 {
+		rest := strings.TrimSpace(raw[idx+len("---HASHTAGS---"):])
+		for _, tag := range strings.Split(rest, ",") {
+			tag = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(tag), "#"))
+			if tag != "" {
+				result.Hashtags = append(result.Hashtags, tag)
+			}
+		}
+	}
+
+	// Fallback: if markers not found, use entire text as voiceover.
+	if result.Voiceover == "" {
+		result.Voiceover = strings.TrimSpace(raw)
+	}
+	if result.Caption == "" {
+		// Auto-generate caption from first line of voiceover.
+		lines := strings.SplitN(result.Voiceover, "\n", 2)
+		result.Caption = lines[0]
+	}
+
+	return result
 }
 
 // -------- Utilities --------
