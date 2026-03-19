@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"syscall"
 )
 
 // EdgeConfig holds settings for the free Microsoft Edge TTS.
@@ -113,6 +114,11 @@ func (c *EdgeClient) synthesizeWithVoiceAndRate(ctx context.Context, text string
 		"--file="+txtPath,
 		"--write-media="+mp3Path,
 	)
+	// Use process group so context cancellation kills all child processes.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("edge-tts: %s: %w", truncateBytes(out, 500), err)

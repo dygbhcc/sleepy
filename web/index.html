@@ -50,6 +50,9 @@ header span.subtitle{color:var(--text2);font-size:14px}
 /* Card */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
 .card h2{font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.log-box{background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;height:160px;overflow-y:auto;padding:8px 10px;font-family:monospace;font-size:11px;line-height:1.5}
+.log-line{color:#8b949e;white-space:pre-wrap;word-break:break-all}
+.log-line.err{color:#f85149}.log-line.warn{color:#e3b341}
 
 /* Form */
 .form-group{margin-bottom:14px}
@@ -258,6 +261,15 @@ tr:hover{background:var(--surface2);cursor:pointer}
       </table>
     </div>
   </div>
+
+  <!-- Log Panel -->
+  <div class="card" style="margin-top:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h2 style="margin:0">Worker Logs</h2>
+      <button onclick="document.getElementById('logBox').innerHTML=''" style="background:none;border:none;color:var(--text2);font-size:11px;cursor:pointer;padding:2px 6px">clear</button>
+    </div>
+    <div class="log-box" id="logBox"></div>
+  </div>
 </div>
 
 <!-- Detail Modal -->
@@ -289,16 +301,20 @@ tr:hover{background:var(--surface2);cursor:pointer}
         </div>
       </div>
 
-      <!-- API Keys (env vars) -->
+      <!-- API Keys -->
       <div class="settings-section">
+        <h3>API Keys</h3>
         <div class="settings-grid">
-          <div class="form-group">
-            <label>OPENAI_API_KEY</label>
-            <span id="envOpenAI" class="env-status"></span>
+          <div class="form-group settings-full">
+            <label>OpenAI API Key</label>
+            <input type="password" id="sOpenAIKey" placeholder="sk-... (leave blank to keep existing)">
           </div>
-          <div class="form-group">
-            <label>ELEVENLABS_API_KEY</label>
-            <span id="envElevenLabs" class="env-status"></span>
+          <div class="form-group settings-full">
+            <label>ElevenLabs API Key <span style="color:var(--text2);font-weight:400;font-size:11px">(prod mode only)</span></label>
+            <div style="display:flex;gap:8px">
+              <input type="password" id="sElevenLabsKey" placeholder="(leave blank to keep existing)" style="flex:1">
+              <button type="button" onclick="connectElevenLabs()" style="white-space:nowrap;padding:8px 14px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer">Connect</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1472,15 +1488,13 @@ async function loadSettings(){
     const res=await fetch(API+'/api/settings');
     const s=await res.json();
     setSettingsMode(s.mode||'test');
-    // Show env var status
-    setEnvStatus('envOpenAI',s.openai_key_set);
-    setEnvStatus('envElevenLabs',s.elevenlabs_key_set);
+    document.getElementById('sOpenAIKey').value=s.openai_api_key||'';
+    document.getElementById('sElevenLabsKey').value=s.elevenlabs_api_key||'';
     document.getElementById('sTestOpenAIModel').value=s.openai_model||'gpt-4o-mini';
     document.getElementById('sOpenAIBaseURL').value=s.openai_base_url||'';
     document.getElementById('sOpenAIModel').value=s.openai_model||'';
-    // Store voice_id so we can set it after fetching voices.
     window._pendingVoiceID=s.elevenlabs_voice_id||'';
-    if(s.elevenlabs_key_set){
+    if(s.elevenlabs_api_key){
       fetchVoices(s.elevenlabs_voice_id);
     }
     fetchModels(s.elevenlabs_model_id);
@@ -1504,6 +1518,8 @@ async function loadSettings(){
 async function saveSettings(){
   const body={
     mode:settingsMode,
+    openai_api_key:document.getElementById('sOpenAIKey').value,
+    elevenlabs_api_key:document.getElementById('sElevenLabsKey').value,
     openai_base_url:settingsMode==='prod'?document.getElementById('sOpenAIBaseURL').value:'',
     openai_model:settingsMode==='test'?document.getElementById('sTestOpenAIModel').value:document.getElementById('sOpenAIModel').value,
     elevenlabs_voice_id:document.getElementById('sElevenVoiceID').value,
@@ -1523,6 +1539,20 @@ async function saveSettings(){
     if(!res.ok)throw new Error((await res.json()).error);
     toast(t('settingsSaved'));
   }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
+}
+
+// ==================== ElevenLabs connect ====================
+async function connectElevenLabs(){
+  const key=document.getElementById('sElevenLabsKey').value.trim();
+  if(!key){toast('ElevenLabs API key boş','error');return;}
+  try{
+    const res=await fetch(API+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({elevenlabs_api_key:key})});
+    if(!res.ok)throw new Error((await res.json()).error);
+    toast('ElevenLabs bağlandı, sesler yükleniyor...');
+    fetchVoices('');
+    fetchModels('');
+  }catch(e){toast('Hata: '+e.message,'error')}
 }
 
 // ==================== YouTube ====================
@@ -1622,6 +1652,25 @@ async function stopWorker(){
   }catch(e){toast(t('errorPrefix')+': '+e.message,'error')}
 }
 
+// ==================== Logs ====================
+let _lastLogCount=0;
+async function pollLogs(){
+  try{
+    const res=await fetch(API+'/api/logs');
+    if(!res.ok)return;
+    const {lines=[]}=await res.json();
+    if(lines.length===_lastLogCount)return;
+    _lastLogCount=lines.length;
+    const box=document.getElementById('logBox');
+    const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<30;
+    box.innerHTML=lines.map(l=>{
+      const cls=/\b(error|fatal|panic)\b/i.test(l)?'err':/\bwarn/i.test(l)?'warn':'';
+      return `<div class="log-line${cls?' '+cls:''}">${esc(l)}</div>`;
+    }).join('');
+    if(atBottom)box.scrollTop=box.scrollHeight;
+  }catch(e){}
+}
+
 // ==================== Init ====================
 document.getElementById('langSelect').value=currentLang;
 setLang(currentLang);
@@ -1629,6 +1678,8 @@ fetchRuns();
 refreshTimer=setInterval(fetchRuns,10000);
 pollWorkerStatus();
 setInterval(pollWorkerStatus,5000);
+pollLogs();
+setInterval(pollLogs,2000);
 </script>
 </body>
 </html>

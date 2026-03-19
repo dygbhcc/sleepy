@@ -27,8 +27,8 @@ func Open(dsn string) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-	pool.SetMaxOpenConns(5)
-	pool.SetMaxIdleConns(2)
+	pool.SetMaxOpenConns(20)
+	pool.SetMaxIdleConns(10)
 	pool.SetConnMaxLifetime(5 * time.Minute)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -296,8 +296,11 @@ func (d *DB) ApproveVoice(ctx context.Context, id string) error {
 // Inflight limits exclude statuses where the number of actively-locked runs >= cap.
 // Returns nil, nil if no run is available.
 func (d *DB) ClaimNextRun(ctx context.Context, workerID string, maxScript, maxTTS, maxRender int) (*domain.Run, error) {
-	// Build per-stage inflight exclusions.
-	inflightGate := buildInflightGate(maxScript, maxTTS, maxRender)
+	// Build per-stage inflight exclusions with parameterized queries.
+	gateClauses, gateArgs := buildInflightGate(maxScript, maxTTS, maxRender, 2) // $1 is workerID, start at $2
+
+	args := []any{workerID}
+	args = append(args, gateArgs...)
 
 	r := &domain.Run{}
 	err := scanRun(d.pool.QueryRowContext(ctx,
@@ -306,13 +309,13 @@ func (d *DB) ClaimNextRun(ctx context.Context, workerID string, maxScript, maxTT
 		 WHERE id = (
 		     SELECT id FROM runs
 		     WHERE status NOT IN ('DONE','FAILED','NEEDS_REVIEW')
-		       `+inflightGate+`
+		       `+gateClauses+`
 		       AND (locked_by IS NULL OR locked_at < now() - interval '5 minutes')
 		     ORDER BY created_at ASC
 		     LIMIT 1
 		     FOR UPDATE SKIP LOCKED
 		 )
-		 RETURNING `+runColumns, workerID), r)
+		 RETURNING `+runColumns, args...), r)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -322,11 +325,14 @@ func (d *DB) ClaimNextRun(ctx context.Context, workerID string, maxScript, maxTT
 	return r, nil
 }
 
-// buildInflightGate returns SQL AND clauses that exclude statuses where the
-// number of actively-locked runs has reached the per-stage cap. 0 = unlimited.
-func buildInflightGate(maxScript, maxTTS, maxRender int) string {
+// buildInflightGate returns SQL AND clauses (with parameterized placeholders)
+// that exclude statuses where the number of actively-locked runs has reached
+// the per-stage cap. 0 = unlimited. paramStart is the next available $N index.
+func buildInflightGate(maxScript, maxTTS, maxRender int, paramStart int) (string, []any) {
 	var b strings.Builder
-	// stage → status mapping: script=PENDING, tts=SCRIPTED, render=THUMBNAILED
+	var args []any
+	idx := paramStart
+
 	type pair struct {
 		status string
 		limit  int
@@ -338,11 +344,13 @@ func buildInflightGate(maxScript, maxTTS, maxRender int) string {
 	} {
 		if p.limit > 0 {
 			fmt.Fprintf(&b,
-				`AND NOT (status = '%s' AND (SELECT count(*) FROM runs r2 WHERE r2.status = '%s' AND r2.locked_by IS NOT NULL AND r2.locked_at >= now() - interval '5 minutes') >= %d) `,
-				p.status, p.status, p.limit)
+				`AND NOT (status = $%d AND (SELECT count(*) FROM runs r2 WHERE r2.status = $%d AND r2.locked_by IS NOT NULL AND r2.locked_at >= now() - interval '5 minutes') >= $%d) `,
+				idx, idx+1, idx+2)
+			args = append(args, p.status, p.status, p.limit)
+			idx += 3
 		}
 	}
-	return b.String()
+	return b.String(), args
 }
 
 // ReleaseRun releases the lock on a run after processing one stage.
@@ -674,6 +682,19 @@ func (d *DB) SetYouTubeVideoID(ctx context.Context, runID, videoID string) error
 		return fmt.Errorf("set youtube video id: %w", err)
 	}
 	return nil
+}
+
+// CleanStaleLocks releases locks that are older than 10 minutes (likely from crashed workers)
+// and returns the number of rows affected.
+func (d *DB) CleanStaleLocks(ctx context.Context) (int64, error) {
+	res, err := d.pool.ExecContext(ctx,
+		`UPDATE runs SET locked_by = NULL, locked_at = NULL, updated_at = now()
+		 WHERE locked_by IS NOT NULL AND locked_at < now() - interval '10 minutes'`)
+	if err != nil {
+		return 0, fmt.Errorf("clean stale locks: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 // DeleteRun deletes a run and all associated assets and jobs (via CASCADE).

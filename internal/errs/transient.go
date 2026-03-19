@@ -1,13 +1,17 @@
 package errs
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // TransientError represents a retryable error from an external service.
 // Use errors.As to check if an error is transient.
 type TransientError struct {
-	StatusCode int    // HTTP status code (429, 502, 503, 504, 0 for non-HTTP)
-	Cause      error  // underlying error
-	Provider   string // "openai", "groq", "elevenlabs", "edge_tts", "ffmpeg"
+	StatusCode int           // HTTP status code (429, 502, 503, 504, 0 for non-HTTP)
+	Cause      error         // underlying error
+	Provider   string        // "openai", "groq", "elevenlabs", "edge_tts", "ffmpeg"
+	RetryAfter time.Duration // suggested wait time from Retry-After header (0 = use default backoff)
 }
 
 func (e *TransientError) Error() string {

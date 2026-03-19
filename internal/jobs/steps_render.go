@@ -59,8 +59,25 @@ func stepRender(ctx context.Context, deps Deps, run *domain.Run, policy Policy) 
 		audioDur, fadeStart, deps.Render.FadeOutSec)
 
 	outPath := deps.Store.Path(run.ID, "video.mp4")
-	if err := render.Render(ctx, deps.Render, thumbAsset.Path, audioAsset.Path, audioDur, outPath); err != nil {
+	tmpPath := outPath + ".tmp"
+	if err := render.Render(ctx, deps.Render, thumbAsset.Path, audioAsset.Path, audioDur, tmpPath); err != nil {
+		os.Remove(tmpPath)
 		return fmt.Errorf("ffmpeg render: %w", err)
+	}
+
+	// Validate rendered output before committing.
+	info, err := os.Stat(tmpPath)
+	if err != nil || info.Size() < 1024 {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rendered video missing or too small (%v)", err)
+	}
+	if intErr := render.ProbeVideoIntegrity(ctx, deps.Render.FFmpegBin, tmpPath); intErr != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rendered video failed integrity check: %w", intErr)
+	}
+	if err := os.Rename(tmpPath, outPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("commit rendered video: %w", err)
 	}
 
 	if err := deps.DB.InsertAsset(ctx, run.ID, domain.AssetVideoMP4, outPath); err != nil {

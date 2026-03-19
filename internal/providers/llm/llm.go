@@ -728,10 +728,18 @@ func MarkdownToSSML(md string) string {
 		if i > 0 {
 			b.WriteString("\n<break time=\"1s\"/>\n")
 		}
-		b.WriteString(p)
+		b.WriteString(escapeSSML(p))
 	}
 	b.WriteString("\n</speak>")
 	return b.String()
+}
+
+// escapeSSML escapes XML special characters in text for safe SSML embedding.
+func escapeSSML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
 }
 
 func truncate(s string, n int) string {

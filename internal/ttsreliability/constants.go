@@ -18,8 +18,8 @@ const (
 	FlatFactorThreshold   = 0.0   // any flat factor > 0 → clipping
 	SilenceRatioThreshold = 0.30  // >30% silence → anomaly
 	MinRMSThresholdDB     = -40.0 // RMS below → too quiet
-	MaxLUFSDelta          = 3.0   // max LUFS difference between chunks
-	MaxSpectralDelta      = 3.0   // max spectral proxy delta between chunks
+	MaxLUFSDelta          = 1.5   // max LUFS difference between chunks
+	MaxSpectralDelta      = 2.0   // max spectral proxy delta between chunks
 	MinSpectralProxy      = 8.0   // below → robotic/muffled
 	TargetLUFS            = -16.0 // EBU R128 target
 )

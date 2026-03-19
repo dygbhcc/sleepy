@@ -35,13 +35,23 @@ func (l *LocalFS) Write(runID, filename string, r io.Reader) (string, error) {
 		return "", fmt.Errorf("mkdir: %w", err)
 	}
 	p := filepath.Join(l.RunDir(runID), filename)
-	f, err := os.Create(p)
+	tmp := p + ".tmp"
+	f, err := os.Create(tmp)
 	if err != nil {
-		return "", fmt.Errorf("create %s: %w", p, err)
+		return "", fmt.Errorf("create %s: %w", tmp, err)
 	}
-	defer f.Close()
 	if _, err := io.Copy(f, r); err != nil {
+		f.Close()
+		os.Remove(tmp)
 		return "", fmt.Errorf("write %s: %w", p, err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return "", fmt.Errorf("close %s: %w", p, err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		os.Remove(tmp)
+		return "", fmt.Errorf("rename %s: %w", p, err)
 	}
 	return p, nil
 }
@@ -51,8 +61,13 @@ func (l *LocalFS) WriteBytes(runID, filename string, data []byte) (string, error
 		return "", fmt.Errorf("mkdir: %w", err)
 	}
 	p := filepath.Join(l.RunDir(runID), filename)
-	if err := os.WriteFile(p, data, 0o644); err != nil {
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", p, err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		os.Remove(tmp)
+		return "", fmt.Errorf("rename %s: %w", p, err)
 	}
 	return p, nil
 }

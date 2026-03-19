@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,11 +122,30 @@ func (c *Client) callAPIWithOpts(ctx context.Context, text, outPath string, spee
 		b, _ := io.ReadAll(resp.Body)
 		baseErr := fmt.Errorf("elevenlabs HTTP %d: %s", resp.StatusCode, truncateBytes(b, 500))
 		if resp.StatusCode == 429 || resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504 {
-			return errs.NewTransient("elevenlabs", resp.StatusCode, baseErr)
+			te := errs.NewTransient("elevenlabs", resp.StatusCode, baseErr)
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if secs, err := strconv.Atoi(ra); err == nil {
+					te.RetryAfter = time.Duration(secs) * time.Second
+				}
+			}
+			return te
 		}
 		return baseErr
 	}
 
+	if err := downloadAndValidateMP3(resp, outPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+// minMP3Bytes is the minimum expected size for a valid MP3 file (1 KB).
+const minMP3Bytes = 1024
+
+// downloadAndValidateMP3 writes the response body to outPath and validates
+// that the downloaded file matches Content-Length (if provided) and exceeds
+// the minimum expected size.
+func downloadAndValidateMP3(resp *http.Response, outPath string) error {
 	f, err := os.Create(outPath)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", outPath, err)
@@ -134,10 +154,33 @@ func (c *Client) callAPIWithOpts(ctx context.Context, text, outPath string, spee
 
 	n, err := io.Copy(f, resp.Body)
 	if err != nil {
+		os.Remove(outPath)
 		return fmt.Errorf("download audio: %w", err)
 	}
 	if n == 0 {
+		os.Remove(outPath)
 		return fmt.Errorf("elevenlabs returned empty audio body")
+	}
+	if n < minMP3Bytes {
+		os.Remove(outPath)
+		return fmt.Errorf("elevenlabs returned suspiciously small audio (%d bytes)", n)
+	}
+	if resp.ContentLength > 0 && n != resp.ContentLength {
+		os.Remove(outPath)
+		return fmt.Errorf("incomplete download: got %d bytes, expected %d", n, resp.ContentLength)
+	}
+	return nil
+}
+
+// validateWAVOutput checks that a WAV file exists and has a valid minimum size.
+func validateWAVOutput(wavPath string) error {
+	info, err := os.Stat(wavPath)
+	if err != nil {
+		return fmt.Errorf("wav output missing: %w", err)
+	}
+	if info.Size() < 44 { // WAV header is 44 bytes minimum
+		os.Remove(wavPath)
+		return fmt.Errorf("wav output too small (%d bytes), likely corrupted", info.Size())
 	}
 	return nil
 }
@@ -218,23 +261,19 @@ func (c *Client) callAPI(ctx context.Context, text, outPath string) error {
 		b, _ := io.ReadAll(resp.Body)
 		baseErr := fmt.Errorf("elevenlabs HTTP %d: %s", resp.StatusCode, truncateBytes(b, 500))
 		if resp.StatusCode == 429 || resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504 {
-			return errs.NewTransient("elevenlabs", resp.StatusCode, baseErr)
+			te := errs.NewTransient("elevenlabs", resp.StatusCode, baseErr)
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if secs, err := strconv.Atoi(ra); err == nil {
+					te.RetryAfter = time.Duration(secs) * time.Second
+				}
+			}
+			return te
 		}
 		return baseErr
 	}
 
-	f, err := os.Create(outPath)
-	if err != nil {
-		return fmt.Errorf("create %s: %w", outPath, err)
-	}
-	defer f.Close()
-
-	n, err := io.Copy(f, resp.Body)
-	if err != nil {
-		return fmt.Errorf("download audio: %w", err)
-	}
-	if n == 0 {
-		return fmt.Errorf("elevenlabs returned empty audio body")
+	if err := downloadAndValidateMP3(resp, outPath); err != nil {
+		return err
 	}
 	return nil
 }
@@ -252,7 +291,7 @@ func (c *Client) convertAndNormalize(ctx context.Context, mp3Path, wavPath strin
 	if err != nil {
 		return fmt.Errorf("ffmpeg loudnorm: %s: %w", truncateBytes(out, 300), err)
 	}
-	return nil
+	return validateWAVOutput(wavPath)
 }
 
 // convertToWAV converts MP3 to WAV without normalization.
@@ -267,7 +306,7 @@ func (c *Client) convertToWAV(ctx context.Context, mp3Path, wavPath string) erro
 	if err != nil {
 		return fmt.Errorf("ffmpeg convert: %s: %w", truncateBytes(out, 300), err)
 	}
-	return nil
+	return validateWAVOutput(wavPath)
 }
 
 func truncateBytes(b []byte, n int) string {

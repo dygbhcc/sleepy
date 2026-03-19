@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -47,9 +48,20 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 	ffmpegBin := "ffmpeg"
 	ffprobeBin := "ffprobe"
 
+	// Verify required binaries exist on PATH.
+	if _, err := exec.LookPath(ffmpegBin); err != nil {
+		return fmt.Errorf("ffmpeg not found on PATH: %w", err)
+	}
+	if _, err := exec.LookPath(ffprobeBin); err != nil {
+		return fmt.Errorf("ffprobe not found on PATH: %w", err)
+	}
+
 	var ttsProvider jobs.TTSSynthesizer
 
 	openaiKey := os.Getenv("OPENAI_API_KEY")
+	if openaiKey == "" {
+		openaiKey = settings.OpenAIAPIKey
+	}
 	if openaiKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY env var is required")
 	}
@@ -83,6 +95,9 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 		}
 		elevenKey := os.Getenv("ELEVENLABS_API_KEY")
 		if elevenKey == "" {
+			elevenKey = settings.ElevenLabsAPIKey
+		}
+		if elevenKey == "" {
 			return fmt.Errorf("ELEVENLABS_API_KEY env var is required for prod mode")
 		}
 		ttsProvider = tts.NewClient(tts.Config{
@@ -111,6 +126,13 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 			FFmpegBin: ffmpegBin,
 			Normalize: settings.Normalize,
 		})
+	}
+
+	// Clean up stale locks from previous crashed workers.
+	if n, err := m.db.CleanStaleLocks(context.Background()); err != nil {
+		log.Printf("worker-manager: failed to clean stale locks: %v", err)
+	} else if n > 0 {
+		log.Printf("worker-manager: cleaned %d stale locks from previous run", n)
 	}
 
 	// Bootstrap fix engine from historical outcomes.
@@ -188,17 +210,32 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 	return nil
 }
 
-// Stop cancels the worker context and waits briefly for it to wind down.
+// Stop cancels the worker context and waits for goroutines to finish (up to 30s).
 func (m *Manager) Stop() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if m.cancel != nil {
 		m.cancel()
 	}
+	m.mu.Unlock()
+
+	// Wait for workers to drain with a timeout.
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Println("worker-manager: all workers stopped cleanly")
+	case <-time.After(30 * time.Second):
+		log.Println("worker-manager: stop timed out after 30s, some workers may still be running")
+	}
+
+	m.mu.Lock()
 	m.running = false
 	m.cancel = nil
-	log.Println("worker-manager: stop requested")
+	m.mu.Unlock()
 }
 
 // Running returns whether the worker goroutine is currently active.

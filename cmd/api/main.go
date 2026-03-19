@@ -18,6 +18,7 @@ import (
 	"sleepy/internal/db"
 	"sleepy/internal/domain"
 	"sleepy/internal/jobs"
+	"sleepy/internal/logbuf"
 	"sleepy/internal/providers/youtube"
 	"sleepy/internal/worker"
 )
@@ -27,6 +28,8 @@ var assetRoot string
 var workerMgr *worker.Manager
 
 func main() {
+	log.SetOutput(logbuf.MultiWriter(os.Stderr))
+
 	dsn := os.Getenv("PG_DSN")
 	if dsn == "" {
 		dsn = "postgres://localhost:5432/sleepy?sslmode=disable"
@@ -34,6 +37,11 @@ func main() {
 	assetRoot = os.Getenv("ASSET_ROOT")
 	if assetRoot == "" {
 		assetRoot = "tmp/assets"
+	}
+
+	// Ensure asset root directory exists and is writable.
+	if err := os.MkdirAll(assetRoot, 0755); err != nil {
+		log.Fatalf("cannot create asset root %s: %v", assetRoot, err)
 	}
 
 	var err error
@@ -71,6 +79,7 @@ func main() {
 	mux.HandleFunc("POST /api/worker/start", handleWorkerStart)
 	mux.HandleFunc("POST /api/worker/stop", handleWorkerStop)
 	mux.HandleFunc("GET /api/worker/status", handleWorkerStatus)
+	mux.HandleFunc("GET /api/logs", handleGetLogs)
 	mux.HandleFunc("GET /api/youtube/auth", handleYouTubeAuth)
 	mux.HandleFunc("GET /api/youtube/callback", handleYouTubeCallback)
 	mux.HandleFunc("GET /api/youtube/status", handleYouTubeStatus)
@@ -373,14 +382,15 @@ func handleServeAsset(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runID")
 	file := r.PathValue("file")
 
-	// Prevent path traversal
-	if strings.Contains(file, "..") || strings.Contains(runID, "..") {
+	// Resolve and verify the path stays within assetRoot.
+	absRoot, _ := filepath.Abs(assetRoot)
+	resolved := filepath.Clean(filepath.Join(absRoot, runID, file))
+	if !strings.HasPrefix(resolved, absRoot+string(os.PathSeparator)) {
 		http.NotFound(w, r)
 		return
 	}
 
-	path := filepath.Join(assetRoot, runID, file)
-	http.ServeFile(w, r, path)
+	http.ServeFile(w, r, resolved)
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -437,8 +447,9 @@ func handleUpdateScript(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Create basic SSML wrapper for TTS.
-		ssmlContent := "<speak>\n" + req.Content + "\n</speak>"
+		// Create basic SSML wrapper for TTS (escape XML special chars).
+		escaped := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(req.Content)
+		ssmlContent := "<speak>\n" + escaped + "\n</speak>"
 		ssmlPath := filepath.Join(runDir, "script.ssml")
 		if err := os.WriteFile(ssmlPath, []byte(ssmlContent), 0644); err != nil {
 			log.Printf("handleUpdateScript: failed to write SSML: %v", err)
@@ -461,10 +472,11 @@ func handleUpdateScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Also update SSML.
+	// Also update SSML (escape XML special chars).
 	ssmlAsset, ssmlErr := store.GetAsset(r.Context(), id, domain.AssetScriptSSML)
 	if ssmlErr == nil {
-		ssmlContent := "<speak>\n" + req.Content + "\n</speak>"
+		escaped := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(req.Content)
+		ssmlContent := "<speak>\n" + escaped + "\n</speak>"
 		_ = os.WriteFile(ssmlAsset.Path, []byte(ssmlContent), 0644)
 	}
 
@@ -485,8 +497,12 @@ func maskKey(key string) string {
 
 // handleElevenLabsVoices proxies the ElevenLabs voices API to list available voices.
 func handleElevenLabsVoices(w http.ResponseWriter, r *http.Request) {
-	// Use API key from environment variable.
 	apiKey := os.Getenv("ELEVENLABS_API_KEY")
+	if apiKey == "" {
+		if s, err := store.GetWorkerSettings(r.Context()); err == nil {
+			apiKey = s.ElevenLabsAPIKey
+		}
+	}
 	if apiKey == "" {
 		writeErr(w, http.StatusBadRequest, "ElevenLabs API key required")
 		return
@@ -637,10 +653,10 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mode":               s.Mode,
-		"openai_key_set":     os.Getenv("OPENAI_API_KEY") != "",
+		"openai_api_key":     maskKey(s.OpenAIAPIKey),
 		"openai_base_url":    s.OpenAIBaseURL,
 		"openai_model":       s.OpenAIModel,
-		"elevenlabs_key_set": os.Getenv("ELEVENLABS_API_KEY") != "",
+		"elevenlabs_api_key": maskKey(s.ElevenLabsAPIKey),
 		"elevenlabs_voice_id": s.ElevenLabsVoiceID,
 		"elevenlabs_model_id": s.ElevenLabsModelID,
 		"elevenlabs_speed":   s.ElevenLabsSpeed,
@@ -660,8 +676,10 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Mode              *string  `json:"mode"`
+		OpenAIAPIKey      *string  `json:"openai_api_key"`
 		OpenAIBaseURL     *string  `json:"openai_base_url"`
 		OpenAIModel       *string  `json:"openai_model"`
+		ElevenLabsAPIKey  *string  `json:"elevenlabs_api_key"`
 		ElevenLabsVoiceID *string  `json:"elevenlabs_voice_id"`
 		ElevenLabsModelID *string  `json:"elevenlabs_model_id"`
 		ElevenLabsSpeed   *float64 `json:"elevenlabs_speed"`
@@ -688,6 +706,12 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	if req.Mode != nil {
 		s.Mode = *req.Mode
+	}
+	if req.OpenAIAPIKey != nil && *req.OpenAIAPIKey != "" && !strings.HasPrefix(*req.OpenAIAPIKey, "***") {
+		s.OpenAIAPIKey = *req.OpenAIAPIKey
+	}
+	if req.ElevenLabsAPIKey != nil && *req.ElevenLabsAPIKey != "" && !strings.HasPrefix(*req.ElevenLabsAPIKey, "***") {
+		s.ElevenLabsAPIKey = *req.ElevenLabsAPIKey
 	}
 	if req.OpenAIBaseURL != nil {
 		s.OpenAIBaseURL = *req.OpenAIBaseURL
@@ -729,6 +753,12 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		s.YouTubeClientSecret = *req.YouTubeClientSecret
 	}
 
+	// Prevent settings changes while worker is running to avoid stale config.
+	if workerMgr.Running() {
+		writeErr(w, http.StatusConflict, "cannot change settings while worker is running — stop the worker first")
+		return
+	}
+
 	if err := store.SaveWorkerSettings(r.Context(), s); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -743,14 +773,14 @@ func handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required API keys (from env vars).
-	if os.Getenv("OPENAI_API_KEY") == "" {
-		writeErr(w, http.StatusBadRequest, "OPENAI_API_KEY env var is required")
+	// Validate required API keys (env var takes priority, DB is fallback).
+	if os.Getenv("OPENAI_API_KEY") == "" && s.OpenAIAPIKey == "" {
+		writeErr(w, http.StatusBadRequest, "OpenAI API key is required (set in Settings or OPENAI_API_KEY env)")
 		return
 	}
 	if s.Mode == "prod" {
-		if os.Getenv("ELEVENLABS_API_KEY") == "" {
-			writeErr(w, http.StatusBadRequest, "ELEVENLABS_API_KEY env var is required for prod mode")
+		if os.Getenv("ELEVENLABS_API_KEY") == "" && s.ElevenLabsAPIKey == "" {
+			writeErr(w, http.StatusBadRequest, "ElevenLabs API key is required for prod mode (set in Settings or ELEVENLABS_API_KEY env)")
 			return
 		}
 		if s.ElevenLabsVoiceID == "" {
@@ -986,4 +1016,8 @@ func handleUploadYouTube(w http.ResponseWriter, r *http.Request) {
 		"video_id": videoID,
 		"url":      "https://youtube.com/watch?v=" + videoID,
 	})
+}
+
+func handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"lines": logbuf.Default.Lines()})
 }

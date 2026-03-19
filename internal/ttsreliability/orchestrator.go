@@ -3,6 +3,7 @@ package ttsreliability
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -338,48 +339,98 @@ func (o *Orchestrator) assembleChunks(ctx context.Context, results []ChunkResult
 		return fmt.Errorf("write concat file: %w", err)
 	}
 
-	// Concat + re-encode + loudnorm in one pass to final WAV.
-	cmd := exec.CommandContext(ctx, o.ffmpegBin,
+	// Step 1: concat chunks into a raw WAV without normalization.
+	rawPath := outPath + ".raw.wav"
+	defer os.Remove(rawPath)
+	cmdConcat := exec.CommandContext(ctx, o.ffmpegBin,
 		"-f", "concat", "-safe", "0", "-i", concatPath,
-		"-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
 		"-ar", "44100", "-ac", "1",
-		"-y", outPath,
+		"-y", rawPath,
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := cmdConcat.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg concat: %s: %w", truncate(string(out), 300), err)
 	}
 
+	// Step 2: two-pass loudnorm on the full concatenated audio for consistent level.
+	return applyLoudnormToOutput(ctx, o.ffmpegBin, rawPath, outPath)
+}
+
+// loudnormStats holds the measured values from a loudnorm first pass.
+type loudnormStats struct {
+	InputI      string `json:"input_i"`
+	InputTP     string `json:"input_tp"`
+	InputLRA    string `json:"input_lra"`
+	InputThresh string `json:"input_thresh"`
+	TargetOffset string `json:"target_offset"`
+}
+
+// measureLoudnorm runs a first-pass loudnorm analysis and returns measured stats.
+func measureLoudnorm(ctx context.Context, ffmpegBin, inputPath string) (*loudnormStats, error) {
+	cmd := exec.CommandContext(ctx, ffmpegBin,
+		"-i", inputPath,
+		"-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json",
+		"-f", "null", "-",
+	)
+	// ffmpeg writes loudnorm JSON to stderr
+	out, _ := cmd.CombinedOutput()
+	raw := string(out)
+
+	// Extract JSON block from stderr output
+	start := strings.LastIndex(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start < 0 || end < start {
+		return nil, fmt.Errorf("loudnorm JSON not found in output")
+	}
+	var stats loudnormStats
+	if err := json.Unmarshal([]byte(raw[start:end+1]), &stats); err != nil {
+		return nil, fmt.Errorf("parse loudnorm JSON: %w", err)
+	}
+	return &stats, nil
+}
+
+// twoPassLoudnorm applies accurate two-pass EBU R128 normalization from inputPath to outputPath.
+func twoPassLoudnorm(ctx context.Context, ffmpegBin, inputPath, outputPath string, extraArgs ...string) error {
+	stats, err := measureLoudnorm(ctx, ffmpegBin, inputPath)
+	if err != nil {
+		// Fall back to single-pass if measurement fails
+		log.Printf("loudnorm measure failed (%v), falling back to single-pass", err)
+		args := []string{"-i", inputPath, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11"}
+		args = append(args, extraArgs...)
+		args = append(args, "-y", outputPath)
+		cmd := exec.CommandContext(ctx, ffmpegBin, args...)
+		if out, err2 := cmd.CombinedOutput(); err2 != nil {
+			return fmt.Errorf("loudnorm fallback: %s: %w", truncate(string(out), 300), err2)
+		}
+		return nil
+	}
+
+	filter := fmt.Sprintf(
+		"loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=%s:measured_TP=%s:measured_LRA=%s:measured_thresh=%s:offset=%s:linear=true",
+		stats.InputI, stats.InputTP, stats.InputLRA, stats.InputThresh, stats.TargetOffset,
+	)
+	args := []string{"-i", inputPath, "-af", filter}
+	args = append(args, extraArgs...)
+	args = append(args, "-y", outputPath)
+	cmd := exec.CommandContext(ctx, ffmpegBin, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("loudnorm pass2: %s: %w", truncate(string(out), 300), err)
+	}
 	return nil
 }
 
-// applyLoudnorm runs EBU R128 loudness normalization in-place.
+// applyLoudnorm runs two-pass EBU R128 loudness normalization in-place.
 func applyLoudnorm(ctx context.Context, ffmpegBin, filePath string) error {
 	tmpPath := filePath + ".loudnorm.tmp"
 	defer os.Remove(tmpPath)
-
-	cmd := exec.CommandContext(ctx, ffmpegBin,
-		"-i", filePath,
-		"-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-		"-y", tmpPath,
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("loudnorm: %s: %w", truncate(string(out), 300), err)
+	if err := twoPassLoudnorm(ctx, ffmpegBin, filePath, tmpPath); err != nil {
+		return fmt.Errorf("loudnorm: %w", err)
 	}
 	return os.Rename(tmpPath, filePath)
 }
 
-// applyLoudnormToOutput converts input to WAV with loudnorm.
+// applyLoudnormToOutput converts input to WAV with two-pass loudnorm.
 func applyLoudnormToOutput(ctx context.Context, ffmpegBin, inputPath, outputPath string) error {
-	cmd := exec.CommandContext(ctx, ffmpegBin,
-		"-i", inputPath,
-		"-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-		"-ar", "44100", "-ac", "1",
-		"-y", outputPath,
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("loudnorm to output: %s: %w", truncate(string(out), 300), err)
-	}
-	return nil
+	return twoPassLoudnorm(ctx, ffmpegBin, inputPath, outputPath, "-ar", "44100", "-ac", "1")
 }
 
 func truncate(s string, n int) string {
