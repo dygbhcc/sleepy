@@ -86,7 +86,7 @@ func renderWithMusic(ctx context.Context, cfg RenderConfig, imagePath, audioPath
 	cmd := exec.CommandContext(ctx, cfg.FFmpegBin,
 		"-loop", "1", "-framerate", fmt.Sprintf("%d", OutputFPS), "-t", duration, "-i", imagePath,
 		"-t", duration, "-i", audioPath,
-		"-stream_loop", "-1", "-i", cfg.MusicPath,
+		"-stream_loop", "-1", "-t", duration, "-i", cfg.MusicPath,
 		"-filter_complex", fc,
 		"-map", "[vout]", "-map", "[aout]",
 		"-c:v", "libx264", "-profile:v", "high", "-level", "4.0",
