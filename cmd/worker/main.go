@@ -14,6 +14,7 @@ import (
 	"sleepy/internal/providers/image"
 	"sleepy/internal/providers/llm"
 	"sleepy/internal/providers/tts"
+	"sleepy/internal/providers/youtube"
 	"sleepy/internal/render"
 	"sleepy/internal/storage"
 )
@@ -105,6 +106,22 @@ func main() {
 			MusicVol:   0.5,
 		},
 		FixEngine: jobs.NewFixEngine(outcomes),
+	}
+
+	// Wire up YouTube client from DB settings (configured via workflow or UI).
+	settings, err := database.GetWorkerSettings(context.Background())
+	if err != nil {
+		log.Printf("warning: failed to load worker settings: %v", err)
+	} else if settings.YouTubeEnabled && settings.YouTubeClientID != "" && settings.YouTubeClientSecret != "" {
+		oauthCfg := youtube.NewOAuthConfig(settings.YouTubeClientID, settings.YouTubeClientSecret, "")
+		deps.YouTube = youtube.NewClient(oauthCfg, database)
+		deps.YouTubePrivacy = settings.YouTubePrivacy
+		if deps.YouTubePrivacy == "" {
+			deps.YouTubePrivacy = "unlisted"
+		}
+		log.Printf("youtube: enabled (privacy=%s)", deps.YouTubePrivacy)
+	} else {
+		log.Println("youtube: disabled (not configured in worker_settings)")
 	}
 
 	log.Printf("config: normalize=%v ffmpeg=%s ffprobe=%s", normalize, ffmpegBin, ffprobeBin)
