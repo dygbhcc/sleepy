@@ -15,7 +15,9 @@ import (
 func stepRender(ctx context.Context, deps Deps, run *domain.Run, policy Policy) error {
 	log.Printf("step_render: rendering video for run %s", run.ID)
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	// Timeout scales with audio duration: base 30 min + 1 min per minute of audio.
+	timeoutMin := 30 + int(run.DurationMin)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMin)*time.Minute)
 	defer cancel()
 
 	thumbAsset, err := deps.DB.GetAsset(ctx, run.ID, domain.AssetThumbnailPNG)

@@ -68,15 +68,17 @@ func Render(ctx context.Context, cfg RenderConfig, imagePath, audioPath string, 
 // Music is looped (-stream_loop -1) so it never runs out before narration ends.
 // amix uses duration=first (narration) and normalize=0 to prevent automatic volume halving.
 func renderWithMusic(ctx context.Context, cfg RenderConfig, imagePath, audioPath string, audioDurSec, fadeStart float64, vFilter, outPath string) error {
-	// Everything in one filter_complex: video + audio mixing.
-	// normalize=0 prevents amix from dividing each input's volume by N.
-	// duration=first makes the mix last as long as the narration (first amix input).
+	// Loop music inside the filter graph using aloop instead of -stream_loop
+	// which can hang on some ffmpeg versions with wav inputs.
+	// aloop: loop=-1 means infinite, size=2s worth of samples at 44100Hz.
+	// atrim then cuts it to the narration length.
 	fc := fmt.Sprintf(
 		"[0:v]%s[vout];"+
 			"[1:a]volume=1.0[narr];"+
-			"[2:a]volume=%.2f[music];"+
+			"[2:a]aloop=loop=-1:size=2e9:start=0,atrim=0:%.2f,asetpts=PTS-STARTPTS,volume=%.2f[music];"+
 			"[narr][music]amix=inputs=2:duration=first:normalize=0,afade=t=out:st=%.2f:d=%.2f[aout]",
 		vFilter,
+		audioDurSec,
 		cfg.MusicVol,
 		fadeStart, cfg.FadeOutSec,
 	)
@@ -86,7 +88,7 @@ func renderWithMusic(ctx context.Context, cfg RenderConfig, imagePath, audioPath
 	cmd := exec.CommandContext(ctx, cfg.FFmpegBin,
 		"-loop", "1", "-framerate", fmt.Sprintf("%d", OutputFPS), "-t", duration, "-i", imagePath,
 		"-t", duration, "-i", audioPath,
-		"-stream_loop", "-1", "-t", duration, "-i", cfg.MusicPath,
+		"-i", cfg.MusicPath,
 		"-filter_complex", fc,
 		"-map", "[vout]", "-map", "[aout]",
 		"-c:v", "libx264", "-profile:v", "high", "-level", "4.0",
