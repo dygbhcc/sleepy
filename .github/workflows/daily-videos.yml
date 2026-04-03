@@ -30,7 +30,7 @@ jobs:
       PG_DSN: postgres://sleepy:sleepy@localhost:5432/sleepy?sslmode=disable
       ASSET_ROOT: tmp/assets
       MODE: test
-      EDGE_VOICE: en-US-AndrewMultilingualNeural
+      EDGE_VOICE: en-US-AriaNeural
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: gpt-5.2
 
