@@ -85,9 +85,9 @@ jobs:
 
       - name: Seed daily runs
         run: |
-          ./bin/seed -series Cosmos -style Cosmos -episode "$(date +%Y-%m-%d) Cosmos" -duration 30
-          ./bin/seed -series Earthside -style Earthside -episode "$(date +%Y-%m-%d) Earthside" -duration 30
-          ./bin/seed -series Myth -style Myth -episode "$(date +%Y-%m-%d) Myth" -duration 30
+          ./bin/seed -series Cosmos -style Cosmos -episode "$(date +%Y-%m-%d) Cosmos" -duration 10
+          # ./bin/seed -series Earthside -style Earthside -episode "$(date +%Y-%m-%d) Earthside" -duration 30
+          # ./bin/seed -series Myth -style Myth -episode "$(date +%Y-%m-%d) Myth" -duration 30
 
       - name: Run worker (process all runs)
         run: WORKER_ONE_SHOT=1 ./bin/worker
