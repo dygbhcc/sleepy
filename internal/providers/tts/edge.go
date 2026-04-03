@@ -11,9 +11,9 @@ import (
 // EdgeConfig holds settings for the free Microsoft Edge TTS.
 type EdgeConfig struct {
 	Voice     string // e.g. "en-US-AriaNeural"; default "en-US-AriaNeural"
-	Rate      string // e.g. "-25%"; default "-25%" (slower for sleep)
-	Pitch     string // e.g. "-5Hz"; default "-5Hz" (deeper, calmer tone)
-	Volume    string // e.g. "-5%"; default "-5%" (slightly quieter, intimate)
+	Rate      string // e.g. "-40%"; default "-40%" (slow, bedtime pace)
+	Pitch     string // e.g. "-10Hz"; default "-10Hz" (deeper, warmer tone)
+	Volume    string // e.g. "-10%"; default "-10%" (soft, intimate)
 	FFmpegBin string
 	Normalize bool
 }
@@ -29,13 +29,13 @@ func NewEdgeClient(cfg EdgeConfig) *EdgeClient {
 		cfg.Voice = "en-US-AriaNeural"
 	}
 	if cfg.Rate == "" {
-		cfg.Rate = "-25%"
+		cfg.Rate = "-40%"
 	}
 	if cfg.Pitch == "" {
-		cfg.Pitch = "-5Hz"
+		cfg.Pitch = "-10Hz"
 	}
 	if cfg.Volume == "" {
-		cfg.Volume = "-5%"
+		cfg.Volume = "-10%"
 	}
 	if cfg.FFmpegBin == "" {
 		cfg.FFmpegBin = "ffmpeg"
