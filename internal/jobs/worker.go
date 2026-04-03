@@ -10,6 +10,7 @@ import (
 	"sleepy/internal/domain"
 	"sleepy/internal/providers/image"
 	"sleepy/internal/providers/llm"
+	"sleepy/internal/providers/tts"
 	"sleepy/internal/providers/youtube"
 	"sleepy/internal/render"
 	"sleepy/internal/storage"
@@ -245,6 +246,15 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 		clearFixState(ctx, deps.DB, run.ID)
 
 		next := domain.NextStatus(stage)
+
+		// Auto-approve voice for non-ElevenLabs TTS (free providers).
+		// ElevenLabs costs money, so approval stays manual via the UI.
+		if stage == domain.StatusPending && next == domain.StatusScripted {
+			if _, isElevenLabs := deps.TTS.(*tts.Client); !isElevenLabs {
+				_ = deps.DB.ApproveVoice(ctx, run.ID)
+			}
+		}
+
 		if err := deps.DB.UpdateRunStatus(ctx, run.ID, next); err != nil {
 			return fmt.Errorf("advance to %s: %w", next, err)
 		}

@@ -306,6 +306,7 @@ func (d *DB) ClaimNextRun(ctx context.Context, workerID string, maxScript, maxTT
 		 WHERE id = (
 		     SELECT id FROM runs
 		     WHERE status NOT IN ('DONE','FAILED','NEEDS_REVIEW')
+		       AND NOT (status = 'SCRIPTED' AND voice_approved = false)
 		       `+inflightGate+`
 		       AND (locked_by IS NULL OR locked_at < now() - interval '5 minutes')
 		     ORDER BY created_at ASC

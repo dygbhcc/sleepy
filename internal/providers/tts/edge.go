@@ -10,8 +10,10 @@ import (
 
 // EdgeConfig holds settings for the free Microsoft Edge TTS.
 type EdgeConfig struct {
-	Voice     string // e.g. "en-US-AndrewNeural"; default "en-US-AndrewNeural"
-	Rate      string // e.g. "-20%"; default "-20%" (slower for sleep)
+	Voice     string // e.g. "en-US-AriaNeural"; default "en-US-AriaNeural"
+	Rate      string // e.g. "-25%"; default "-25%" (slower for sleep)
+	Pitch     string // e.g. "-5Hz"; default "-5Hz" (deeper, calmer tone)
+	Volume    string // e.g. "-5%"; default "-5%" (slightly quieter, intimate)
 	FFmpegBin string
 	Normalize bool
 }
@@ -24,10 +26,16 @@ type EdgeClient struct {
 // NewEdgeClient creates a configured Edge TTS client.
 func NewEdgeClient(cfg EdgeConfig) *EdgeClient {
 	if cfg.Voice == "" {
-		cfg.Voice = "en-US-AndrewNeural"
+		cfg.Voice = "en-US-AriaNeural"
 	}
 	if cfg.Rate == "" {
-		cfg.Rate = "-20%"
+		cfg.Rate = "-25%"
+	}
+	if cfg.Pitch == "" {
+		cfg.Pitch = "-5Hz"
+	}
+	if cfg.Volume == "" {
+		cfg.Volume = "-5%"
 	}
 	if cfg.FFmpegBin == "" {
 		cfg.FFmpegBin = "ffmpeg"
@@ -37,11 +45,11 @@ func NewEdgeClient(cfg EdgeConfig) *EdgeClient {
 
 // defaultVoices maps language codes to recommended Edge TTS voices for sleep narration.
 var defaultVoices = map[string]string{
-	"en": "en-US-AndrewNeural",
-	"tr": "tr-TR-AhmetNeural",
-	"pt": "pt-BR-AntonioNeural",
+	"en": "en-US-AriaNeural",
+	"tr": "tr-TR-EmelNeural",
+	"pt": "pt-BR-FranciscaNeural",
 	"es": "es-ES-AlvaroNeural",
-	"it": "it-IT-DiegoNeural",
+	"it": "it-IT-IsabellaNeural",
 }
 
 // VoiceForLang returns the configured voice for the given language,
@@ -96,7 +104,7 @@ func (c *EdgeClient) synthesizeWithVoice(ctx context.Context, text string, outPa
 func (c *EdgeClient) synthesizeWithVoiceAndRate(ctx context.Context, text string, outPath string, voice string, rate string) error {
 	mp3Path := outPath + ".tmp.mp3"
 
-	log.Printf("edge-tts: synthesizing with voice=%s rate=%s", voice, rate)
+	log.Printf("edge-tts: synthesizing with voice=%s rate=%s pitch=%s volume=%s", voice, rate, c.cfg.Pitch, c.cfg.Volume)
 
 	// Write text to temp file to avoid shell escaping issues.
 	txtPath := outPath + ".tmp.txt"
@@ -105,11 +113,13 @@ func (c *EdgeClient) synthesizeWithVoiceAndRate(ctx context.Context, text string
 	}
 	defer os.Remove(txtPath)
 
-	// Call edge-tts. Use --rate=VALUE format to prevent argparse from
-	// interpreting negative values like "-20%" as flags.
+	// Call edge-tts. Use --flag=VALUE format to prevent argparse from
+	// interpreting negative values like "-25%" as flags.
 	cmd := exec.CommandContext(ctx, "python3", "-m", "edge_tts",
 		"--voice="+voice,
 		"--rate="+rate,
+		"--pitch="+c.cfg.Pitch,
+		"--volume="+c.cfg.Volume,
 		"--file="+txtPath,
 		"--write-media="+mp3Path,
 	)
