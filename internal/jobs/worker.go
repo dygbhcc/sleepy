@@ -112,8 +112,22 @@ func RunWorker(ctx context.Context, deps Deps, pollInterval time.Duration, oneSh
 		}
 
 		if oneShot {
-			log.Printf("worker[%s]: exiting (one-shot)", workerID)
-			return
+			// Re-read the run; if it reached a terminal state or errored, exit.
+			updated, rerr := deps.DB.GetRun(ctx, run.ID)
+			if rerr != nil || updated == nil {
+				log.Printf("worker[%s]: exiting (one-shot, cannot re-read run)", workerID)
+				return
+			}
+			if updated.Status == domain.StatusDone || updated.Status == domain.StatusFailed || updated.Status == domain.StatusNeedsReview {
+				log.Printf("worker[%s]: run %s reached %s, exiting (one-shot)", workerID, run.ID, updated.Status)
+				return
+			}
+			if err != nil {
+				log.Printf("worker[%s]: run %s stage error, exiting (one-shot): %v", workerID, run.ID, err)
+				return
+			}
+			// Otherwise continue to process the next stage of the same run.
+			log.Printf("worker[%s]: run %s at %s, continuing to next stage (one-shot)", workerID, run.ID, updated.Status)
 		}
 	}
 }
