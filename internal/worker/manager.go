@@ -94,6 +94,24 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 			FFmpegBin: ffmpegBin,
 		})
 
+	case "kokoro":
+		log.Println("worker-manager: starting in kokoro mode (local Kokoro TTS)")
+
+		voice := settings.KokoroVoice
+		if voice == "" {
+			voice = "af_sky"
+		}
+		speed := settings.KokoroSpeed
+		if speed <= 0 {
+			speed = 0.85
+		}
+		ttsProvider = tts.NewKokoroClient(tts.KokoroConfig{
+			Voice:     voice,
+			Speed:     speed,
+			FFmpegBin: ffmpegBin,
+			Normalize: settings.Normalize,
+		})
+
 	default: // "test"
 		log.Println("worker-manager: starting in test mode (Edge TTS)")
 

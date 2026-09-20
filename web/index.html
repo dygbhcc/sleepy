@@ -285,6 +285,7 @@ tr:hover{background:var(--surface2);cursor:pointer}
         <h3 data-i18n="modeLabel"></h3>
         <div class="mode-toggle">
           <button id="modeTestBtn" onclick="setSettingsMode('test')" data-i18n="modeTest"></button>
+          <button id="modeKokoroBtn" onclick="setSettingsMode('kokoro')">Kokoro</button>
           <button id="modeProdBtn" onclick="setSettingsMode('prod')" data-i18n="modeProd"></button>
         </div>
       </div>
@@ -327,6 +328,30 @@ tr:hover{background:var(--surface2);cursor:pointer}
             </select>
           </div>
         </div>
+      </div>
+
+      <!-- Kokoro mode fields -->
+      <div id="kokoroFields" class="settings-section" style="display:none">
+        <h3>OpenAI LLM + Kokoro TTS (local, free)</h3>
+        <div class="settings-grid">
+          <div class="form-group">
+            <label>OpenAI Base URL</label>
+            <input type="text" id="sKokoroBaseURL" placeholder="https://api.groq.com/openai/v1">
+          </div>
+          <div class="form-group">
+            <label>OpenAI Model</label>
+            <input type="text" id="sKokoroModel" placeholder="llama-3.3-70b-versatile">
+          </div>
+          <div class="form-group">
+            <label>Kokoro Voice</label>
+            <input type="text" id="sKokoroVoice" placeholder="af_sky" style="font-family:monospace">
+          </div>
+          <div class="form-group">
+            <label>Speed: <span id="sKokoroSpeedVal">0.85</span></label>
+            <input type="range" id="sKokoroSpeed" step="0.05" min="0.5" max="1.5" value="0.85" oninput="document.getElementById('sKokoroSpeedVal').textContent=parseFloat(this.value).toFixed(2)" style="width:100%;accent-color:var(--accent)">
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--text2);margin-top:8px">Install: <code style="background:var(--surface2);padding:2px 5px;border-radius:4px">pip install kokoro soundfile numpy</code></p>
       </div>
 
       <!-- Prod mode fields -->
@@ -1462,8 +1487,10 @@ async function fetchMusic(selectPath){
 function setSettingsMode(mode){
   settingsMode=mode;
   document.getElementById('modeTestBtn').className=mode==='test'?'active':'';
+  document.getElementById('modeKokoroBtn').className=mode==='kokoro'?'active':'';
   document.getElementById('modeProdBtn').className=mode==='prod'?'active':'';
   document.getElementById('testFields').style.display=mode==='test'?'block':'none';
+  document.getElementById('kokoroFields').style.display=mode==='kokoro'?'block':'none';
   document.getElementById('prodFields').style.display=mode==='prod'?'block':'none';
 }
 
@@ -1489,6 +1516,12 @@ async function loadSettings(){
     document.getElementById('sElevenSpeedVal').textContent=parseFloat(speedVal).toFixed(2);
     fetchEdgeVoices(s.edge_voice||'en-US-AndrewNeural');
     if(s.edge_rate)document.getElementById('sEdgeRate').value=s.edge_rate;
+    document.getElementById('sKokoroVoice').value=s.kokoro_voice||'af_sky';
+    document.getElementById('sKokoroBaseURL').value=s.openai_base_url||'';
+    document.getElementById('sKokoroModel').value=s.openai_model||'llama-3.3-70b-versatile';
+    const kokoroSpeed=s.kokoro_speed||0.85;
+    document.getElementById('sKokoroSpeed').value=kokoroSpeed;
+    document.getElementById('sKokoroSpeedVal').textContent=parseFloat(kokoroSpeed).toFixed(2);
     document.getElementById('sNormalize').checked=s.normalize!==false;
     // Load ambient tracks
     fetchMusic(s.music_path||'');
@@ -1504,8 +1537,10 @@ async function loadSettings(){
 async function saveSettings(){
   const body={
     mode:settingsMode,
-    openai_base_url:settingsMode==='prod'?document.getElementById('sOpenAIBaseURL').value:'',
-    openai_model:settingsMode==='test'?document.getElementById('sTestOpenAIModel').value:document.getElementById('sOpenAIModel').value,
+    openai_base_url:settingsMode==='prod'?document.getElementById('sOpenAIBaseURL').value:settingsMode==='kokoro'?document.getElementById('sKokoroBaseURL').value:'',
+    openai_model:settingsMode==='test'?document.getElementById('sTestOpenAIModel').value:settingsMode==='kokoro'?document.getElementById('sKokoroModel').value:document.getElementById('sOpenAIModel').value,
+    kokoro_voice:document.getElementById('sKokoroVoice').value,
+    kokoro_speed:parseFloat(document.getElementById('sKokoroSpeed').value)||0.85,
     elevenlabs_voice_id:document.getElementById('sElevenVoiceID').value,
     elevenlabs_model_id:document.getElementById('sElevenModelID').value,
     elevenlabs_speed:parseFloat(document.getElementById('sElevenSpeed').value)||0.80,

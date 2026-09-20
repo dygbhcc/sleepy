@@ -646,6 +646,8 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"elevenlabs_speed":   s.ElevenLabsSpeed,
 		"edge_voice":         s.EdgeVoice,
 		"edge_rate":          s.EdgeRate,
+		"kokoro_voice":       s.KokoroVoice,
+		"kokoro_speed":       s.KokoroSpeed,
 		"normalize":              s.Normalize,
 		"music_path":             s.MusicPath,
 		"youtube_enabled":         s.YouTubeEnabled,
@@ -667,6 +669,8 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		ElevenLabsSpeed   *float64 `json:"elevenlabs_speed"`
 		EdgeVoice            *string  `json:"edge_voice"`
 		EdgeRate             *string  `json:"edge_rate"`
+		KokoroVoice          *string  `json:"kokoro_voice"`
+		KokoroSpeed          *float64 `json:"kokoro_speed"`
 		Normalize            *bool    `json:"normalize"`
 		MusicPath            *string  `json:"music_path"`
 		YouTubeEnabled       *bool    `json:"youtube_enabled"`
@@ -709,6 +713,12 @@ func handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.EdgeRate != nil {
 		s.EdgeRate = *req.EdgeRate
+	}
+	if req.KokoroVoice != nil {
+		s.KokoroVoice = *req.KokoroVoice
+	}
+	if req.KokoroSpeed != nil {
+		s.KokoroSpeed = *req.KokoroSpeed
 	}
 	if req.Normalize != nil {
 		s.Normalize = *req.Normalize
@@ -757,6 +767,9 @@ func handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "ElevenLabs Voice ID is required for prod mode")
 			return
 		}
+	}
+	if s.Mode == "kokoro" && s.KokoroVoice == "" {
+		s.KokoroVoice = "af_sky"
 	}
 
 	if err := workerMgr.Start(s); err != nil {

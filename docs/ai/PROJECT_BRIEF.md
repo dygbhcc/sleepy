@@ -37,13 +37,17 @@ cmd/worker/main.go       — Standalone worker binary
 internal/jobs/           — Worker loop, QA, steps, fix engine, policy
 internal/db/             — PostgreSQL CRUD + migrations/
 internal/domain/         — Run, Asset, state machine
-internal/providers/      — LLM, TTS (ElevenLabs + Edge), image
+internal/providers/      — LLM, TTS (Kokoro local, Edge, ElevenLabs legacy), image, youtube
 internal/worker/         — In-process worker manager
 web/index.html           — Single-file SPA dashboard
 ```
 
 ## Providers
-| Mode | LLM | TTS | Cost |
-|---|---|---|---|
-| test | Groq (Llama 3.3 70B) | Edge TTS | Free |
-| prod | OpenAI GPT-4o | ElevenLabs | Paid (voice gate) |
+| Mode | LLM | TTS | Cost | Notes |
+|---|---|---|---|---|
+| test | Groq (Llama 3.3 70B) | Edge TTS | Free | dev/testing only |
+| kokoro | OpenAI GPT-4o-mini (or Groq, configurable) | Kokoro TTS (local, via `scripts/kokoro_tts.py`) | Free — no TTS API key | **primary TTS mode going forward** |
+| prod | OpenAI GPT-4o | ElevenLabs | Paid (LLM + TTS) | legacy/optional; no longer the default |
+
+Mode is chosen per-worker in Settings (`mode`: `test` / `kokoro` / `prod`, see `internal/worker/manager.go`).
+The voice approval gate applies regardless of which TTS engine is selected.

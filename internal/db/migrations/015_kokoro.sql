@@ -1,0 +1,2 @@
+ALTER TABLE worker_settings ADD COLUMN IF NOT EXISTS kokoro_voice TEXT NOT NULL DEFAULT 'af_sky';
+ALTER TABLE worker_settings ADD COLUMN IF NOT EXISTS kokoro_speed REAL NOT NULL DEFAULT 0.85;

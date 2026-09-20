@@ -88,6 +88,8 @@ type WorkerSettings struct {
 	ElevenLabsSpeed   float64
 	EdgeVoice         string
 	EdgeRate          string
+	KokoroVoice       string  // Kokoro TTS voice name (e.g. "af_sky")
+	KokoroSpeed       float64 // Kokoro TTS speed (0.5–1.5; default 0.85)
 	Normalize         bool
 	MusicPath         string // path to ambient music file (empty = no music)
 
