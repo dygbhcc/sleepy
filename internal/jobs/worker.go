@@ -281,6 +281,7 @@ func processOneStage(ctx context.Context, deps Deps, run *domain.Run, workerID s
 	if deps.FixEngine != nil {
 		fix = deps.FixEngine.DecideFix(stage, report, run, policy)
 		log.Printf("worker[%s]: run %s fix_engine → action=%s plan=%s", workerID, run.ID, fix.Action, fix.ID)
+		deps.FixEngine.MaybeShadowReason(deps.DB, run.ID, stage, report, fix.ID)
 	} else {
 		decision := Decide(stage, report, run, policy)
 		fix = FixPlan{

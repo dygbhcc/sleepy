@@ -140,6 +140,25 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 		log.Printf("worker-manager: loaded %d historical fix outcomes", len(outcomes))
 	}
 
+	fixEngine := jobs.NewFixEngine(outcomes)
+	if reasonerKey := os.Getenv("FIX_REASONER_API_KEY"); reasonerKey != "" {
+		reasonerBaseURL := os.Getenv("FIX_REASONER_BASE_URL")
+		if reasonerBaseURL == "" {
+			reasonerBaseURL = "https://api.groq.com/openai/v1"
+		}
+		reasonerModel := os.Getenv("FIX_REASONER_MODEL")
+		if reasonerModel == "" {
+			reasonerModel = "llama-3.3-70b-versatile"
+		}
+		reasonerClient := llm.NewClient(llm.Config{
+			BaseURL: reasonerBaseURL,
+			APIKey:  reasonerKey,
+			Model:   reasonerModel,
+		})
+		fixEngine.SetReasoner(reasonerClient)
+		log.Println("worker-manager: fix_reasoner shadow mode enabled (logging only, no behavior change)")
+	}
+
 	deps := jobs.Deps{
 		InflightLimits: jobs.InflightLimits{
 			Script: settings.MaxInflightScript,
@@ -161,7 +180,7 @@ func (m *Manager) Start(settings *domain.WorkerSettings) error {
 			MusicPath:  settings.MusicPath,
 			MusicVol:   0.5,
 		},
-		FixEngine: jobs.NewFixEngine(outcomes),
+		FixEngine: fixEngine,
 	}
 
 	// Wire up YouTube client if configured.

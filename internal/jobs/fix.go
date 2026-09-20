@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"sleepy/internal/domain"
+	"sleepy/internal/providers/llm"
 )
 
 // FixPlan describes a single corrective action the engine will attempt.
@@ -20,8 +21,18 @@ type FixPlan struct {
 
 // FixEngine selects the best fix for a QA failure.
 type FixEngine struct {
-	catalog *FixCatalog
-	scorer  *FixScorer
+	catalog  *FixCatalog
+	scorer   *FixScorer
+	reasoner *llm.Client // optional; nil = no shadow reasoning (default)
+}
+
+// SetReasoner attaches an optional LLM-backed shadow reasoner. When set, the
+// worker loop can call MaybeShadowReason (fix_reasoner.go) after DecideFix to
+// log what the model would have chosen, for comparison against the
+// deterministic scorer. This never changes DecideFix's own output — the
+// scorer remains the sole decision-maker for the actual pipeline.
+func (fe *FixEngine) SetReasoner(reasoner *llm.Client) {
+	fe.reasoner = reasoner
 }
 
 // NewFixEngine creates a FixEngine with the default catalog and scorer.

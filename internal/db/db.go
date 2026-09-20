@@ -256,6 +256,34 @@ func (d *DB) ListFixOutcomes(ctx context.Context) ([]FixOutcomeRow, error) {
 	return results, rows.Err()
 }
 
+// FixReasonerLogRow is the DB-layer representation of a shadow-mode
+// reasoner decision, logged for comparison against the deterministic
+// scorer's actual choice. Purely observational — never read back by the
+// pipeline itself.
+type FixReasonerLogRow struct {
+	RunID             string
+	Stage             string
+	FailType          string
+	ScorerChoice      string
+	ReasonerChoice    string
+	ReasonerRationale string
+	Agreed            bool
+	Error             string
+}
+
+// InsertFixReasonerLog persists one shadow-mode reasoner decision.
+func (d *DB) InsertFixReasonerLog(ctx context.Context, r FixReasonerLogRow) error {
+	_, err := d.pool.ExecContext(ctx,
+		`INSERT INTO fix_reasoner_log (run_id, stage, fail_type, scorer_choice, reasoner_choice, reasoner_rationale, agreed, error)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		r.RunID, r.Stage, r.FailType, r.ScorerChoice, r.ReasonerChoice, r.ReasonerRationale, r.Agreed, r.Error,
+	)
+	if err != nil {
+		return fmt.Errorf("insert fix reasoner log: %w", err)
+	}
+	return nil
+}
+
 // UpdateActiveFixPlan sets the active fix plan and the starting attempt count.
 func (d *DB) UpdateActiveFixPlan(ctx context.Context, id, planID string, startAttempt int) error {
 	_, err := d.pool.ExecContext(ctx,

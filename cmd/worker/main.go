@@ -89,6 +89,17 @@ func main() {
 		log.Printf("loaded %d historical fix outcomes for scorer", len(outcomes))
 	}
 
+	fixEngine := jobs.NewFixEngine(outcomes)
+	if reasonerKey := os.Getenv("FIX_REASONER_API_KEY"); reasonerKey != "" {
+		reasonerClient := llm.NewClient(llm.Config{
+			BaseURL: envOr("FIX_REASONER_BASE_URL", "https://api.groq.com/openai/v1"),
+			APIKey:  reasonerKey,
+			Model:   envOr("FIX_REASONER_MODEL", "llama-3.3-70b-versatile"),
+		})
+		fixEngine.SetReasoner(reasonerClient)
+		log.Println("fix_reasoner: shadow mode enabled (logging only, no behavior change)")
+	}
+
 	deps := jobs.Deps{
 		DB:    database,
 		Store: storage.NewLocalFS(assetRoot),
@@ -105,7 +116,7 @@ func main() {
 			MusicPath:  envOr("MUSIC_PATH", "assets/music/Floating_in_Deep_Space.wav"),
 			MusicVol:   0.5,
 		},
-		FixEngine: jobs.NewFixEngine(outcomes),
+		FixEngine: fixEngine,
 	}
 
 	// Wire up YouTube client from DB settings (configured via workflow or UI).
